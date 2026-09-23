@@ -1,0 +1,2441 @@
+Yes. I would build this as an **independent multi-tenant project management platform**, basically a Jira-class system without depending on Atlassian APIs or Atlassian infrastructure.
+
+My recommendation is: **do not start with microservices**. Build a well-structured modular monolith first, with separate workers for background jobs. This will be much easier to build, test, and maintain. NestJS is designed around modular application structure and supports authentication, authorization, queues, scheduling, WebSockets, etc.; Next.js provides the frontend/full-stack application layer. ([NestJS Documentation][1])
+
+# 1. Product Architecture
+
+Call the product something generic for now, for example:
+
+**ProjectOS**
+
+The platform hierarchy should be:
+
+```text
+Platform
+│
+├── Organization
+│   │
+│   ├── Users
+│   ├── Teams
+│   ├── Roles
+│   │
+│   ├── Projects
+│   │   ├── Issues
+│   │   │   ├── Epics
+│   │   │   ├── Stories
+│   │   │   ├── Tasks
+│   │   │   └── Bugs
+│   │   │
+│   │   ├── Backlog
+│   │   ├── Sprints
+│   │   ├── Boards
+│   │   ├── Workflows
+│   │   ├── Components
+│   │   ├── Versions
+│   │   ├── Roadmap
+│   │   └── Reports
+│   │
+│   ├── Automation Rules
+│   ├── Dashboards
+│   ├── Audit Logs
+│   └── Organization Settings
+│
+└── Platform Administration
+```
+
+This gives you proper SaaS isolation from day one.
+
+---
+
+# 2. Recommended Technology Stack
+
+| Layer           | Technology                      |
+| --------------- | ------------------------------- |
+| Frontend        | Next.js + React + TypeScript    |
+| UI              | Tailwind CSS + component system |
+| Backend         | NestJS + TypeScript             |
+| Database        | PostgreSQL                      |
+| Cache           | Redis                           |
+| Background jobs | Redis + BullMQ                  |
+| Authentication  | Keycloak self-hosted            |
+| Object storage  | S3-compatible storage           |
+| Search          | PostgreSQL FTS initially        |
+| Realtime        | WebSocket                       |
+| Email           | SMTP provider                   |
+| Reverse proxy   | Nginx / Traefik                 |
+| Containers      | Docker                          |
+| Deployment      | VPS/cloud                       |
+| Monitoring      | Prometheus + Grafana            |
+| Error tracking  | Sentry/self-hosted alternative  |
+| CI/CD           | GitHub Actions                  |
+
+Next.js currently supports the App Router and React-based application architecture. ([Next.js][2])
+
+NestJS provides modular architecture and documented authentication/security patterns, which fit a large product like this. ([NestJS Documentation][3])
+
+For SSO, I would use **self-hosted Keycloak** rather than writing SAML from zero. Keycloak supports OpenID Connect and SAML, and can act as an identity broker. ([Keycloak][4])
+
+For file uploads, use private object storage and short-lived signed URLs rather than sending large files through your API server. S3 supports presigned upload/download URLs. ([AWS Documentation][5])
+
+---
+
+# 3. Multi-Tenant Architecture
+
+This is the most important architectural decision.
+
+Every organization gets its own tenant:
+
+```text
+Organization A
+    ↓
+Projects
+Issues
+Users
+Dashboards
+
+Organization B
+    ↓
+Projects
+Issues
+Users
+Dashboards
+```
+
+Every important database table should contain:
+
+```text
+organization_id
+```
+
+Example:
+
+```text
+issues
+---------
+id
+organization_id
+project_id
+issue_key
+summary
+description
+status_id
+priority_id
+assignee_id
+reporter_id
+story_points
+due_date
+created_at
+updated_at
+```
+
+Use PostgreSQL Row-Level Security as an additional isolation layer. PostgreSQL supports policies that restrict which rows a database user can read, insert, update, or delete. ([PostgreSQL][6])
+
+So security should be:
+
+```text
+User
+ ↓
+JWT / Session
+ ↓
+Organization membership
+ ↓
+Role permission
+ ↓
+Project permission
+ ↓
+Issue permission
+ ↓
+Database tenant isolation
+```
+
+Never rely only on frontend checks.
+
+---
+
+# 4. Domain Provisioning
+
+Do not actually buy a new domain for every customer.
+
+Use:
+
+```text
+app.yourplatform.com
+```
+
+and wildcard subdomains:
+
+```text
+acme.yourplatform.com
+microsoft.yourplatform.com
+startup123.yourplatform.com
+```
+
+DNS:
+
+```text
+*.yourplatform.com → Load Balancer
+```
+
+Then your reverse proxy reads the hostname:
+
+```text
+acme.yourplatform.com
+        ↓
+slug = acme
+        ↓
+organization = ACME
+        ↓
+load ACME workspace
+```
+
+Later support:
+
+```text
+pm.acme.com
+```
+
+through a custom-domain feature.
+
+---
+
+# 5. Account Creation
+
+Create an onboarding flow:
+
+```text
+/sign-up
+
+Email
+Password
+Name
+Company name
+Workspace slug
+```
+
+Then:
+
+```text
+Choose authentication
+├── Email
+├── Google
+└── Corporate SSO
+```
+
+Account entities:
+
+```text
+users
+organizations
+organization_members
+identity_accounts
+sessions
+sso_connections
+```
+
+For Google:
+
+```text
+Google OAuth
+ ↓
+Identity Provider
+ ↓
+Your user
+```
+
+For corporate SSO:
+
+```text
+Company
+ ↓
+SAML / OIDC
+ ↓
+Keycloak
+ ↓
+Your application
+```
+
+Keycloak is useful here because it already handles modern identity-provider flows and SAML/OIDC federation. ([Keycloak][4])
+
+---
+
+# 6. Onboarding Wizard
+
+After signup:
+
+```text
+STEP 1
+Create Organization
+
+STEP 2
+Workspace URL
+
+STEP 3
+Choose Template
+
+Scrum
+Kanban
+Bug Tracking
+Project Management
+Custom
+
+STEP 4
+Choose Project Model
+
+Team-managed
+Company-managed
+
+STEP 5
+Invite Team
+
+STEP 6
+Create First Project
+```
+
+Templates should be stored in the database rather than hardcoded.
+
+Example:
+
+```json
+{
+  "template": "scrum",
+  "issue_types": [
+    "Epic",
+    "Story",
+    "Task",
+    "Bug"
+  ],
+  "statuses": [
+    "To Do",
+    "In Progress",
+    "Review",
+    "Done"
+  ],
+  "workflow": "standard-scrum"
+}
+```
+
+---
+
+# 7. Project System
+
+Project database:
+
+```text
+projects
+---------
+id
+organization_id
+key
+name
+description
+project_type
+template_id
+lead_id
+avatar
+created_at
+archived_at
+```
+
+Example:
+
+```text
+Website Redesign
+Key: WEB
+
+AI Platform
+Key: AI
+
+Mobile Application
+Key: APP
+```
+
+Issue IDs:
+
+```text
+WEB-1
+WEB-2
+WEB-3
+AI-1
+AI-2
+```
+
+This is very important because users will naturally use issue keys everywhere.
+
+---
+
+# 8. Issue Engine
+
+The issue engine is the heart of the product.
+
+Issue model:
+
+```text
+issues
+---------
+id
+organization_id
+project_id
+issue_number
+issue_key
+issue_type_id
+summary
+description
+status_id
+priority_id
+resolution_id
+reporter_id
+assignee_id
+parent_issue_id
+story_points
+start_date
+due_date
+estimate_seconds
+remaining_seconds
+created_at
+updated_at
+```
+
+Issue types:
+
+```text
+Epic
+Story
+Task
+Bug
+Sub-task
+Custom
+```
+
+Do not hardcode these.
+
+Create:
+
+```text
+issue_types
+```
+
+so organizations can create:
+
+```text
+Design Request
+Customer Request
+Security Incident
+Research
+```
+
+---
+
+# 9. Custom Field Engine
+
+This should be generic.
+
+```text
+custom_fields
+--------------
+id
+organization_id
+name
+field_type
+configuration
+```
+
+Supported types:
+
+```text
+text
+textarea
+number
+decimal
+checkbox
+date
+datetime
+dropdown
+multi-select
+user
+team
+url
+email
+```
+
+Store values separately:
+
+```text
+issue_custom_values
+--------------------
+issue_id
+custom_field_id
+value_text
+value_number
+value_boolean
+value_date
+value_json
+```
+
+For flexible configuration, PostgreSQL `jsonb` is useful and supports GIN indexes for indexed JSON queries. ([PostgreSQL][7])
+
+---
+
+# 10. Workflow Engine
+
+This needs its own engine.
+
+Database:
+
+```text
+workflows
+workflow_statuses
+workflow_transitions
+workflow_transition_rules
+workflow_transition_permissions
+```
+
+Example:
+
+```text
+                    ┌─────────────┐
+                    │    OPEN     │
+                    └──────┬──────┘
+                           │
+                     Start Work
+                           ↓
+                   ┌─────────────┐
+                   │ IN PROGRESS │
+                   └──────┬──────┘
+                          │
+                    Submit Review
+                          ↓
+                   ┌─────────────┐
+                   │   REVIEW    │
+                   └──────┬──────┘
+                          │
+                        Approve
+                          ↓
+                   ┌─────────────┐
+                   │    DONE     │
+                   └─────────────┘
+```
+
+Drag-and-drop workflow designer:
+
+```text
+React Flow
+      ↓
+Workflow JSON
+      ↓
+Validation
+      ↓
+PostgreSQL
+```
+
+Important:
+
+A status change must go through a transition service.
+
+Do not allow:
+
+```text
+UPDATE issues SET status_id = ...
+```
+
+everywhere.
+
+Instead:
+
+```text
+transitionIssue(issueId, transitionId, userId)
+```
+
+This makes permissions, automation and audit logs much easier.
+
+---
+
+# 11. Agile System
+
+Create:
+
+```text
+backlogs
+sprints
+sprint_issues
+boards
+board_columns
+board_filters
+```
+
+Sprint:
+
+```text
+id
+project_id
+name
+goal
+start_date
+end_date
+status
+capacity
+```
+
+States:
+
+```text
+Future
+Active
+Completed
+Cancelled
+```
+
+Sprint planning:
+
+```text
+Backlog
+
+WEB-15
+WEB-18
+WEB-21
+WEB-25
+WEB-27
+```
+
+Drag:
+
+```text
+WEB-18
+WEB-21
+WEB-27
+```
+
+into:
+
+```text
+Sprint 12
+```
+
+Then the system calculates:
+
+```text
+Total Story Points
+Committed Work
+Completed Work
+Remaining Work
+Capacity
+```
+
+---
+
+# 12. Scrum/Kanban Board
+
+Board architecture:
+
+```text
+Board
+│
+├── Filter
+├── Columns
+│   ├── To Do
+│   ├── Development
+│   ├── Review
+│   └── Done
+│
+└── Cards
+```
+
+Dragging card:
+
+```text
+UI
+ ↓
+PATCH /issues/:id/status
+ ↓
+Workflow Engine
+ ↓
+Validate Transition
+ ↓
+Database Transaction
+ ↓
+Event
+ ↓
+WebSocket
+ ↓
+Other Users
+```
+
+That final realtime step is very important.
+
+Two users should immediately see board changes.
+
+---
+
+# 13. Rich Issue Page
+
+Issue page:
+
+```text
+WEB-123
+Fix checkout validation bug
+```
+
+Layout:
+
+```text
+┌─────────────────────────────────────────────┐
+│ Issue Key / Type / Status                   │
+├─────────────────────────────────────────────┤
+│ Summary                                     │
+│                                             │
+│ Rich Text Description                       │
+│                                             │
+│ Attachments                                 │
+│                                             │
+│ Comments                                    │
+│                                             │
+├───────────────────┬─────────────────────────┤
+│ Assignee          │ Reporter                │
+│ Priority          │ Sprint                  │
+│ Story Points      │ Component               │
+│ Version           │ Due Date                │
+│ Parent            │ Labels                  │
+└───────────────────┴─────────────────────────┘
+```
+
+Use a structured rich-text representation such as:
+
+```text
+JSON document
+```
+
+rather than saving arbitrary HTML as your primary source.
+
+---
+
+# 14. Comments & Mentions
+
+Tables:
+
+```text
+comments
+comment_mentions
+comment_reactions
+```
+
+Comment:
+
+```text
+@Sajjad please review this API.
+```
+
+Backend:
+
+```text
+Comment Created
+       ↓
+Parse Mentions
+       ↓
+Find Users
+       ↓
+Create Notifications
+       ↓
+Email
+       ↓
+Push notification
+       ↓
+Realtime WebSocket event
+```
+
+---
+
+# 15. Attachments
+
+Never store files directly inside PostgreSQL.
+
+Use:
+
+```text
+S3 / MinIO
+```
+
+Database:
+
+```text
+attachments
+-----------
+id
+organization_id
+issue_id
+uploaded_by
+original_name
+storage_key
+mime_type
+size
+checksum
+created_at
+```
+
+Flow:
+
+```text
+Browser
+ ↓
+POST /attachments/presign
+ ↓
+API
+ ↓
+Signed URL
+ ↓
+Object Storage
+ ↓
+Upload
+ ↓
+API confirms upload
+```
+
+S3 presigned URLs are specifically designed for temporary upload/download access without exposing storage credentials to the browser. ([AWS Documentation][5])
+
+---
+
+# 16. Issue Linking
+
+Create:
+
+```text
+issue_links
+```
+
+Types:
+
+```text
+blocks
+blocked_by
+relates_to
+duplicates
+duplicated_by
+parent_of
+child_of
+```
+
+Example:
+
+```text
+AI-120
+    BLOCKS
+AI-125
+```
+
+Issue page shows:
+
+```text
+Dependencies
+├── blocks AI-125
+└── blocked by AI-110
+```
+
+Also prevent circular relationships for dependency types.
+
+---
+
+# 17. Components & Versions
+
+Components:
+
+```text
+Frontend
+Backend
+Database
+Authentication
+DevOps
+Design
+```
+
+Versions:
+
+```text
+v1.0
+v1.1
+v2.0
+```
+
+Tables:
+
+```text
+components
+versions
+issue_components
+issue_versions
+```
+
+Version should support:
+
+```text
+start_date
+release_date
+released
+description
+```
+
+---
+
+# 18. Roadmap / Gantt
+
+Roadmap entities:
+
+```text
+roadmaps
+roadmap_items
+```
+
+A roadmap item can reference:
+
+```text
+Epic
+Project
+Version
+Milestone
+```
+
+Timeline:
+
+```text
+Jan     Feb     Mar     Apr     May
+|-------|-------|-------|-------|
+
+Epic A  █████████████
+
+Epic B          █████████████
+
+Epic C                  ███████████████
+```
+
+For frontend rendering, use a timeline/Gantt component or build a custom canvas/grid renderer.
+
+Do not calculate everything in the browser. Backend should provide:
+
+```text
+start
+end
+dependencies
+progress
+status
+```
+
+---
+
+# 19. No-Code Automation
+
+This should become one of your strongest features.
+
+Use an event-driven architecture.
+
+Events:
+
+```text
+issue.created
+issue.updated
+issue.status_changed
+issue.assigned
+comment.created
+sprint.started
+sprint.completed
+version.released
+```
+
+Automation rule:
+
+```text
+WHEN
+Issue moves to "Code Review"
+
+IF
+Issue type = Story
+
+THEN
+Assign to Team Lead
+AND
+Add label "review"
+AND
+Send notification
+```
+
+Database:
+
+```text
+automation_rules
+automation_triggers
+automation_conditions
+automation_actions
+automation_runs
+```
+
+Example internal JSON:
+
+```json
+{
+  "trigger": "issue.status_changed",
+  "conditions": [
+    {
+      "field": "issue.type",
+      "operator": "equals",
+      "value": "Story"
+    }
+  ],
+  "actions": [
+    {
+      "type": "assign_user",
+      "user_id": "..."
+    },
+    {
+      "type": "add_label",
+      "value": "review"
+    }
+  ]
+}
+```
+
+Run automation through workers, not directly inside HTTP requests.
+
+---
+
+# 20. Permission System
+
+Create RBAC:
+
+```text
+Viewer
+Contributor
+Developer
+Project Manager
+Project Admin
+Organization Admin
+```
+
+But don't hardcode only these roles.
+
+Tables:
+
+```text
+roles
+permissions
+role_permissions
+organization_members
+project_members
+project_roles
+```
+
+Permissions:
+
+```text
+project.view
+project.edit
+issue.create
+issue.view
+issue.edit
+issue.delete
+issue.assign
+issue.transition
+comment.create
+attachment.upload
+workflow.manage
+automation.manage
+dashboard.manage
+project.archive
+```
+
+Then you can create custom enterprise roles.
+
+---
+
+# 21. Team-Managed vs Company-Managed
+
+Implement this as a configuration model.
+
+### Team-managed
+
+Project owns its:
+
+```text
+Statuses
+Workflows
+Issue types
+Fields
+Board
+Permissions
+```
+
+### Company-managed
+
+Organization/global administration controls:
+
+```text
+Issue types
+Workflows
+Fields
+Permissions
+Statuses
+Schemes
+```
+
+Database:
+
+```text
+projects.management_mode
+
+TEAM
+COMPANY
+```
+
+This distinction will save you a lot of problems later.
+
+---
+
+# 22. Notification System
+
+Central notification engine:
+
+```text
+notifications
+notification_preferences
+email_deliveries
+push_subscriptions
+```
+
+Notification events:
+
+```text
+Mention
+Assignment
+Status change
+Comment
+Issue updated
+Sprint started
+Sprint completed
+Due date
+Automation
+```
+
+User settings:
+
+```text
+Email
+Push
+In-app
+Daily summary
+Immediately
+Never
+```
+
+---
+
+# 23. Dashboard System
+
+Don't create dashboards as fixed pages.
+
+Create a widget engine.
+
+```text
+dashboards
+dashboard_widgets
+```
+
+Widget examples:
+
+```text
+Assigned To Me
+Sprint Progress
+Burndown
+Velocity
+Created vs Resolved
+Cumulative Flow
+Issue Statistics
+Project Health
+Recent Activity
+My Work
+```
+
+Widget configuration:
+
+```json
+{
+  "type": "issue_statistics",
+  "filter": {
+    "project": "WEB",
+    "status": "In Progress"
+  },
+  "display": "bar"
+}
+```
+
+This allows hundreds of dashboard configurations without new database tables.
+
+---
+
+# 24. JQL-like Search Engine
+
+This is a difficult feature and should be developed separately.
+
+Example:
+
+```text
+project = WEB AND status = "In Progress"
+```
+
+Another:
+
+```text
+assignee = sajjad AND priority = High
+```
+
+Pipeline:
+
+```text
+User Query
+   ↓
+Lexer
+   ↓
+Parser
+   ↓
+AST
+   ↓
+Validator
+   ↓
+Query Builder
+   ↓
+PostgreSQL
+   ↓
+Results
+```
+
+Do **not** execute raw user SQL.
+
+For example:
+
+```text
+JQL
+ ↓
+AST
+ ↓
+Safe SQL
+```
+
+PostgreSQL also has built-in full-text search capabilities that can support issue searching before you introduce a separate search engine. ([PostgreSQL][8])
+
+Later, when data becomes very large:
+
+```text
+PostgreSQL
++
+OpenSearch
+```
+
+---
+
+# 25. Reports
+
+Implement these backend calculations.
+
+### Burndown
+
+```text
+Remaining Story Points
+vs
+Days
+```
+
+### Velocity
+
+```text
+Sprint
+Committed
+Completed
+```
+
+### Cumulative Flow
+
+```text
+Date
+ ↓
+Issues by Status
+```
+
+### Created vs Resolved
+
+```text
+Created
+Resolved
+Net Change
+```
+
+### Lead Time
+
+```text
+Created
+ ↓
+In Progress
+ ↓
+Done
+```
+
+Store raw events so reports can be regenerated.
+
+---
+
+# 26. Audit System
+
+This is essential for enterprise use.
+
+Create:
+
+```text
+audit_logs
+```
+
+Record:
+
+```text
+user
+organization
+project
+entity
+entity_id
+action
+old_value
+new_value
+IP
+user_agent
+timestamp
+```
+
+Example:
+
+```text
+Sajjad changed:
+
+Status
+"In Progress" → "Done"
+
+2026-09-23 04:51
+```
+
+Audit logs should be append-only.
+
+---
+
+# 27. Database Structure
+
+A realistic initial database could be:
+
+```text
+users
+organizations
+organization_members
+teams
+team_members
+
+projects
+project_members
+project_roles
+
+issue_types
+issues
+issue_statuses
+issue_priorities
+issue_resolutions
+
+comments
+comment_mentions
+
+attachments
+
+labels
+issue_labels
+
+components
+issue_components
+
+versions
+issue_versions
+
+workflows
+workflow_statuses
+workflow_transitions
+
+boards
+board_columns
+board_filters
+
+sprints
+sprint_issues
+
+custom_fields
+custom_field_contexts
+issue_custom_values
+
+issue_links
+
+roadmaps
+roadmap_items
+
+automation_rules
+automation_runs
+
+dashboards
+dashboard_widgets
+
+notifications
+notification_preferences
+
+audit_logs
+
+saved_filters
+webhooks
+api_keys
+```
+
+---
+
+# 28. Backend Modules
+
+Your NestJS application should look approximately like:
+
+```text
+apps/api/src/
+
+auth/
+organizations/
+users/
+teams/
+
+projects/
+issues/
+issue-types/
+workflows/
+custom-fields/
+
+boards/
+sprints/
+backlog/
+
+comments/
+attachments/
+notifications/
+
+components/
+versions/
+roadmaps/
+
+automation/
+dashboards/
+reports/
+search/
+
+audit/
+webhooks/
+
+admin/
+```
+
+NestJS's module-oriented architecture fits this structure naturally. ([NestJS Documentation][1])
+
+---
+
+# 29. Frontend Structure
+
+```text
+apps/web/
+
+app/
+│
+├── login/
+├── signup/
+├── onboarding/
+│
+├── workspace/
+│   ├── dashboard/
+│   ├── projects/
+│   ├── backlog/
+│   ├── board/
+│   ├── roadmap/
+│   ├── reports/
+│   ├── issues/
+│   ├── dashboards/
+│   └── settings/
+│
+└── admin/
+```
+
+Components:
+
+```text
+components/
+├── issue/
+├── board/
+├── editor/
+├── workflow/
+├── dashboard/
+├── roadmap/
+├── forms/
+├── tables/
+├── dialogs/
+└── navigation/
+```
+
+---
+
+# 30. API Design
+
+Use REST initially.
+
+Example:
+
+```text
+POST   /auth/login
+POST   /organizations
+GET    /organizations/:id
+
+POST   /projects
+GET    /projects/:key
+PATCH  /projects/:id
+
+POST   /issues
+GET    /issues/:key
+PATCH  /issues/:id
+DELETE /issues/:id
+
+POST   /issues/:id/comments
+POST   /issues/:id/attachments
+
+POST   /issues/:id/transitions
+POST   /issues/:id/links
+
+GET    /projects/:id/backlog
+POST   /projects/:id/sprints
+
+POST   /boards
+GET    /boards/:id
+
+POST   /automations
+POST   /workflows
+
+POST   /search
+POST   /filters
+
+GET    /reports/velocity
+GET    /reports/burndown
+GET    /reports/cumulative-flow
+```
+
+Use API versioning:
+
+```text
+/api/v1
+```
+
+---
+
+# 31. Realtime Architecture
+
+Use WebSocket events.
+
+```text
+User A
+ ↓
+API
+ ↓
+Database
+ ↓
+Event
+ ↓
+Redis
+ ↓
+WebSocket Gateway
+ ↓
+User B
+User C
+User D
+```
+
+Events:
+
+```text
+issue.updated
+issue.created
+issue.deleted
+comment.created
+issue.moved
+sprint.updated
+notification.created
+```
+
+This gives the product the feeling of a modern SaaS application.
+
+---
+
+# 32. Background Worker
+
+Separate worker process:
+
+```text
+apps/worker
+```
+
+Jobs:
+
+```text
+Send email
+Generate reports
+Automation execution
+Notification delivery
+Attachment processing
+Webhook delivery
+Scheduled reminders
+Data cleanup
+Search indexing
+```
+
+Architecture:
+
+```text
+API
+ ↓
+Redis Queue
+ ↓
+Worker
+ ↓
+Job Processor
+```
+
+Do not make API requests wait for slow operations.
+
+---
+
+# 33. Security Architecture
+
+Minimum security:
+
+```text
+HTTPS
+Secure cookies
+CSRF protection
+Rate limiting
+Password hashing
+2FA
+Session revocation
+JWT rotation
+Role permissions
+Tenant isolation
+Audit logs
+Signed file URLs
+File type validation
+File size limits
+Virus scanning
+SQL injection prevention
+XSS prevention
+Content Security Policy
+```
+
+NestJS documents common protections such as authentication, authorization, encryption/hashing, CSRF, CORS, and rate limiting. ([NestJS Documentation][9])
+
+For file uploads:
+
+```text
+Upload
+ ↓
+Validate MIME
+ ↓
+Validate extension
+ ↓
+Size limit
+ ↓
+Virus scan
+ ↓
+Store
+```
+
+---
+
+# 34. Email Infrastructure
+
+You need transactional email templates:
+
+```text
+Welcome
+Verify email
+Password reset
+Invitation
+Mention
+Assignment
+Comment
+Sprint started
+Sprint completed
+Automation
+Due date reminder
+```
+
+Use your own email domain:
+
+```text
+notifications@yourplatform.com
+```
+
+Configure:
+
+```text
+SPF
+DKIM
+DMARC
+```
+
+---
+
+# 35. Search
+
+Phase 1:
+
+```text
+PostgreSQL
+```
+
+Search:
+
+```text
+Issue key
+Summary
+Description
+Labels
+Comments
+Users
+Projects
+```
+
+PostgreSQL's full-text search supports document matching and relevance-oriented searching, making it suitable for the initial version. ([PostgreSQL][8])
+
+Later:
+
+```text
+Postgres → event → OpenSearch
+```
+
+for very large installations.
+
+---
+
+# 36. Platform Admin Panel
+
+You need a completely separate admin interface.
+
+```text
+/admin
+
+Organizations
+Users
+Subscriptions
+Storage
+Usage
+System Health
+Audit Logs
+Feature Flags
+Email Logs
+Background Jobs
+API Usage
+Security Events
+```
+
+Admin should be able to:
+
+```text
+Suspend organization
+Restore organization
+Reset user sessions
+View system logs
+Set limits
+Enable feature flags
+Manage global templates
+```
+
+---
+
+# 37. Billing Architecture
+
+Even if billing is not initially active, design for it.
+
+```text
+plans
+subscriptions
+organization_usage
+billing_events
+```
+
+Example:
+
+```text
+Free
+Pro
+Business
+Enterprise
+```
+
+Limits:
+
+```text
+Users
+Projects
+Storage
+Automation executions
+API requests
+File size
+History retention
+```
+
+Keep these limits configurable rather than hardcoded.
+
+---
+
+# 38. API/Webhook System
+
+Create:
+
+```text
+api_keys
+webhooks
+webhook_deliveries
+```
+
+Customers can register:
+
+```text
+POST https://example.com/webhook
+```
+
+Events:
+
+```text
+issue.created
+issue.updated
+issue.deleted
+issue.status_changed
+comment.created
+sprint.completed
+version.released
+```
+
+Sign webhooks:
+
+```text
+X-Signature
+```
+
+so receivers can verify them.
+
+---
+
+# 39. Repository Structure
+
+I would use a monorepo:
+
+```text
+project-os/
+│
+├── apps/
+│   ├── web/
+│   ├── api/
+│   ├── worker/
+│   └── admin/
+│
+├── packages/
+│   ├── ui/
+│   ├── database/
+│   ├── auth/
+│   ├── permissions/
+│   ├── validation/
+│   ├── search/
+│   ├── automation/
+│   └── config/
+│
+├── infrastructure/
+│   ├── docker/
+│   ├── nginx/
+│   ├── terraform/
+│   └── monitoring/
+│
+└── docs/
+```
+
+---
+
+# 40. Development Phases
+
+## Phase 1 — Foundation
+
+Build:
+
+```text
+Authentication
+Organizations
+Users
+Teams
+Projects
+Roles
+Permissions
+Workspace domains
+```
+
+At the end:
+
+```text
+signup
+→ workspace
+→ create project
+→ invite user
+→ permissions
+```
+
+---
+
+## Phase 2 — Core Issue System
+
+Build:
+
+```text
+Issue types
+Issues
+Comments
+Labels
+Attachments
+Assignees
+Priorities
+Due dates
+Issue links
+Activity
+```
+
+Now you have a usable project management system.
+
+---
+
+## Phase 3 — Agile
+
+Build:
+
+```text
+Backlog
+Scrum board
+Kanban board
+Sprints
+Story points
+Sprint planning
+Drag/drop
+Velocity
+Burndown
+```
+
+Now it becomes an actual agile platform.
+
+---
+
+## Phase 4 — Configuration Engine
+
+Build:
+
+```text
+Custom fields
+Workflow builder
+Workflow transitions
+Components
+Versions
+Project templates
+Team-managed projects
+Company-managed projects
+```
+
+This is where the product becomes highly configurable.
+
+---
+
+## Phase 5 — Collaboration
+
+Build:
+
+```text
+Realtime
+Mentions
+Email
+Push notifications
+Activity feed
+Presence
+Subscriptions
+```
+
+---
+
+## Phase 6 — Automation
+
+Build:
+
+```text
+Triggers
+Conditions
+Actions
+Scheduler
+Worker
+Automation logs
+Retry system
+```
+
+Example:
+
+```text
+WHEN status = Review
+IF priority = High
+THEN assign Security Team
+```
+
+---
+
+## Phase 7 — Search & Reporting
+
+Build:
+
+```text
+JQL parser
+Saved filters
+Advanced search
+Dashboards
+Reports
+Velocity
+Burndown
+CFD
+Lead time
+Cycle time
+```
+
+---
+
+## Phase 8 — Enterprise
+
+Build:
+
+```text
+SAML
+OIDC
+2FA
+SCIM
+Advanced audit
+IP restrictions
+Retention policies
+Custom domains
+Enterprise controls
+API keys
+Webhooks
+```
+
+Keycloak can help cover the federation layer because it supports both OIDC and SAML. ([Keycloak][4])
+
+---
+
+# 41. What I Would Build First
+
+Do **not** try to implement all of your requirements simultaneously.
+
+The actual sequence should be:
+
+```text
+1. Database
+      ↓
+2. Authentication
+      ↓
+3. Organization/Tenant
+      ↓
+4. Project
+      ↓
+5. Issue
+      ↓
+6. Issue detail
+      ↓
+7. Workflow
+      ↓
+8. Board
+      ↓
+9. Backlog
+      ↓
+10. Sprint
+      ↓
+11. Comments/Attachments
+      ↓
+12. Notifications
+      ↓
+13. Custom fields
+      ↓
+14. Automation
+      ↓
+15. Reports
+      ↓
+16. JQL
+      ↓
+17. Enterprise SSO
+```
+
+That order is important.
+
+---
+
+# 42. First Database Migration
+
+The first migration should create only:
+
+```text
+users
+organizations
+organization_members
+projects
+issue_types
+issue_statuses
+issues
+```
+
+Then make your first working flow:
+
+```text
+Register
+ ↓
+Create organization
+ ↓
+Create workspace
+ ↓
+Create project
+ ↓
+Create issue
+ ↓
+Open issue
+ ↓
+Edit issue
+ ↓
+Change status
+ ↓
+Create second issue
+```
+
+Until this works perfectly, do not build dashboards, Gantt, automation or JQL.
+
+---
+
+# 43. Testing Strategy
+
+You need 4 types of tests.
+
+### Unit
+
+```text
+Workflow engine
+Permission engine
+JQL parser
+Automation engine
+Reports
+```
+
+### Integration
+
+```text
+API → Database
+API → Redis
+API → Storage
+Auth → Organization
+```
+
+### E2E
+
+```text
+Signup
+Login
+Create project
+Create issue
+Drag issue
+Comment
+Attachment
+Sprint
+Report
+```
+
+### Security
+
+Test:
+
+```text
+User A cannot read Organization B
+User A cannot access Project B
+Viewer cannot modify issue
+Removed member loses access
+Archived project is read-only
+Deleted user tokens stop working
+```
+
+Multi-tenant authorization testing is especially important.
+
+---
+
+# 44. Deployment Architecture
+
+Start with:
+
+```text
+                    Cloudflare
+                        │
+                        ↓
+                 Load Balancer
+                        │
+              ┌─────────┴─────────┐
+              ↓                   ↓
+          Next.js              NestJS
+              │                   │
+              └─────────┬─────────┘
+                        ↓
+                   PostgreSQL
+                        │
+                ┌───────┴───────┐
+                ↓               ↓
+              Redis             S3
+                │
+                ↓
+             Worker
+```
+
+Later:
+
+```text
+Cloudflare
+    ↓
+Kubernetes / ECS
+    ↓
+Web
+API
+Workers
+Redis
+Postgres
+OpenSearch
+Object Storage
+```
+
+---
+
+# 45. Performance Strategy
+
+Do not optimize everything immediately.
+
+Start with indexes:
+
+```text
+issues(project_id)
+issues(status_id)
+issues(assignee_id)
+issues(created_at)
+issues(updated_at)
+issues(issue_key)
+comments(issue_id)
+sprint_issues(sprint_id)
+```
+
+Composite indexes:
+
+```text
+(project_id, status_id)
+(project_id, assignee_id)
+(project_id, updated_at)
+```
+
+Use Redis for:
+
+```text
+Sessions
+Rate limits
+Hot project data
+Dashboard cache
+Job queues
+Realtime coordination
+```
+
+Use pagination everywhere.
+
+Never return:
+
+```text
+10,000 issues
+```
+
+on one request.
+
+---
+
+# 46. Important Design Principle
+
+Make everything **configuration-driven**.
+
+Do not write:
+
+```text
+if project.type === "scrum"
+```
+
+everywhere.
+
+Instead:
+
+```text
+Project
+ ↓
+Configuration
+ ↓
+Capabilities
+```
+
+For example:
+
+```json
+{
+  "boards": true,
+  "sprints": true,
+  "story_points": true,
+  "roadmap": true,
+  "automation": true
+}
+```
+
+This makes future templates easy.
+
+---
+
+# 47. Your Core Engines
+
+The whole product can eventually be understood as 8 major engines:
+
+```text
+┌──────────────────────────────┐
+│       Identity Engine        │
+├──────────────────────────────┤
+│       Tenant Engine          │
+├──────────────────────────────┤
+│       Issue Engine           │
+├──────────────────────────────┤
+│       Workflow Engine        │
+├──────────────────────────────┤
+│       Permission Engine      │
+├──────────────────────────────┤
+│       Automation Engine      │
+├──────────────────────────────┤
+│       Search Engine          │
+├──────────────────────────────┤
+│       Analytics Engine       │
+└──────────────────────────────┘
+```
+
+The UI is mostly a client of these engines.
+
+---
+
+# 48. "Fully Functional" Target
+
+The first serious production release should allow a customer to do this without your help:
+
+```text
+Visit website
+      ↓
+Sign up
+      ↓
+Create organization
+      ↓
+Receive workspace URL
+      ↓
+Choose template
+      ↓
+Create project
+      ↓
+Invite employees
+      ↓
+Create issue
+      ↓
+Assign issue
+      ↓
+Create workflow
+      ↓
+Move issue
+      ↓
+Plan sprint
+      ↓
+Run board
+      ↓
+Comment
+      ↓
+Attach file
+      ↓
+Create dependencies
+      ↓
+Create automation
+      ↓
+View dashboard
+      ↓
+Run search
+      ↓
+View reports
+      ↓
+Archive project
+```
+
+That is the real definition of **fully functional**.
+
+---
+
+# 49. My Recommended MVP
+
+I would make your first production version contain:
+
+**Authentication + Organizations + Projects + Issues + Custom Fields + Workflows + Scrum/Kanban + Backlog + Sprints + Comments + Attachments + Permissions + Notifications + Basic Dashboards + Audit Logs.**
+
+Then add:
+
+**Automation → JQL → Roadmap → Advanced reports → SSO → SCIM → billing → enterprise administration.**
+
+Trying to build JQL, Gantt, automation, SSO, billing and analytics before the issue/workflow engine is stable will create a very large amount of unnecessary complexity.
+
+---
+
+# 50. The Most Important Architecture Decision
+
+I would use this architecture:
+
+```text
+                 ┌─────────────────┐
+                 │    Next.js      │
+                 │    Web App      │
+                 └────────┬────────┘
+                          │
+                   REST + WebSocket
+                          │
+                 ┌────────▼────────┐
+                 │     NestJS      │
+                 │   Application   │
+                 └───────┬─────────┘
+                         │
+        ┌────────────────┼─────────────────┐
+        │                │                 │
+        ▼                ▼                 ▼
+   PostgreSQL          Redis         Object Storage
+        │                │
+        │                ▼
+        │              Worker
+        │                │
+        └────────────────┘
+
+                 ┌─────────────────┐
+                 │     Keycloak    │
+                 │ Auth / SSO      │
+                 └─────────────────┘
+```
+
+This is **independent**, scalable, and does not require Atlassian infrastructure.
+
+The next step I would take is to turn this blueprint into an actual **production project specification** containing the exact PostgreSQL schema, API endpoints, RBAC matrix, event names, folder structure, Docker setup, environment variables, and Phase-1 implementation code. That will turn the idea above into something you can start coding immediately.
+
+[1]: https://docs.nestjs.com/modules?utm_source=chatgpt.com "Modules | NestJS - A progressive Node.js framework"
+[2]: https://nextjs.org/docs?utm_source=chatgpt.com "Next.js Docs | Next.js"
+[3]: https://docs.nestjs.com/security/authentication?utm_source=chatgpt.com "Authentication | NestJS - A progressive Node.js framework"
+[4]: https://www.keycloak.org/docs/latest/server_admin/?utm_source=chatgpt.com "Server Administration Guide"
+[5]: https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html?utm_source=chatgpt.com "Download and upload objects with presigned URLs - Amazon Simple Storage Service"
+[6]: https://www.postgresql.org/docs/17/ddl-rowsecurity.html?utm_source=chatgpt.com "PostgreSQL: Documentation: 17: 5.9. Row Security Policies"
+[7]: https://www.postgresql.org/docs/16/datatype-json.html?utm_source=chatgpt.com "PostgreSQL: Documentation: 16: 8.14. JSON Types"
+[8]: https://www.postgresql.org/docs/17/textsearch-intro.html?utm_source=chatgpt.com "PostgreSQL: Documentation: 17: 12.1. Introduction"
+[9]: https://docs.nestjs.com/techniques?utm_source=chatgpt.com "Documentation | NestJS - A progressive Node.js framework"

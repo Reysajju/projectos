@@ -1,0 +1,261 @@
+// ProjectOS — Jira-class multi-tenant project management portal
+// SQLite + Prisma. Note: primitive list types are not supported, use join models.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Identity Engine ────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  avatarColor  String   @default("#d97706")
+  title        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions      Session[]
+  memberships   OrganizationMember[]
+  ledProjects   Project[]            @relation("ProjectLead")
+  assignedIssues Issue[]             @relation("Assignee")
+  reportedIssues Issue[]             @relation("Reporter")
+  comments      Comment[]
+  activities    Activity[]
+  notifications Notification[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// ─── Tenant Engine ──────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       OrganizationMember[]
+  projects      Project[]
+  issueTypes    IssueType[]
+  statuses      Status[]
+  priorities    Priority[]
+  labels        Label[]
+  activities    Activity[]
+  notifications Notification[]
+}
+
+model OrganizationMember {
+  id     String @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId String
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   String       @default("MEMBER") // ADMIN | MANAGER | MEMBER | VIEWER
+  createdAt DateTime  @default(now())
+
+  @@unique([orgId, userId])
+}
+
+// ─── Projects ───────────────────────────────────────────────────
+
+model Project {
+  id          String    @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  key         String // e.g. WEB → issue keys WEB-1, WEB-2
+  name        String
+  description String?
+  color       String    @default("#d97706")
+  icon        String    @default("rocket")
+  leadId      String?
+  lead        User?     @relation("ProjectLead", fields: [leadId], references: [id])
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  issues  Issue[]
+  sprints Sprint[]
+
+  @@unique([orgId, key])
+}
+
+// ─── Workflow / configuration engine (org-scoped, DB-driven) ────
+
+model IssueType {
+  id     String @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name   String // Epic | Story | Task | Bug | Sub-task
+  color  String
+  icon   String @default("circle")
+  order  Int    @default(0)
+
+  issues Issue[]
+}
+
+model Status {
+  id       String @id @default(cuid())
+  orgId    String
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name     String // Backlog | To Do | In Progress | In Review | Done
+  category String // TODO | IN_PROGRESS | DONE
+  color    String
+  order    Int    @default(0)
+
+  issues Issue[]
+}
+
+model Priority {
+  id     String @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name   String // Lowest | Low | Medium | High | Highest
+  order  Int    @default(0)
+  color  String
+
+  issues Issue[]
+}
+
+model Label {
+  id     String @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name   String
+  color  String
+
+  issues IssueLabel[]
+}
+
+model IssueLabel {
+  issueId String
+  issue   Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  labelId String
+  label   Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([issueId, labelId])
+}
+
+// ─── Issue Engine ───────────────────────────────────────────────
+
+model Sprint {
+  id        String    @id @default(cuid())
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  goal      String?
+  startDate DateTime?
+  endDate   DateTime?
+  status    String    @default("FUTURE") // FUTURE | ACTIVE | COMPLETED
+  order     Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  issues Issue[]
+}
+
+model Issue {
+  id             String    @id @default(cuid())
+  orgId          String
+  projectId      String
+  project        Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  number         Int
+  key            String // WEB-1 (denormalized for fast search)
+  typeId         String
+  type           IssueType @relation(fields: [typeId], references: [id])
+  statusId       String
+  status         Status    @relation(fields: [statusId], references: [id])
+  priorityId     String?
+  priority       Priority? @relation(fields: [priorityId], references: [id])
+  summary        String
+  description    String?
+  reporterId     String?
+  reporter       User?     @relation("Reporter", fields: [reporterId], references: [id])
+  assigneeId     String?
+  assignee       User?     @relation("Assignee", fields: [assigneeId], references: [id])
+  parentId       String?
+  parent         Issue?    @relation("Subtasks", fields: [parentId], references: [id])
+  subtasks       Issue[]   @relation("Subtasks")
+  sprintId       String?
+  sprint         Sprint?   @relation(fields: [sprintId], references: [id])
+  storyPoints    Int?
+  dueDate        DateTime?
+  estimateHours  Float?
+  remainingHours Float?
+  order          Float     @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  comments      Comment[]
+  labels        IssueLabel[]
+  activities    Activity[]
+  notifications Notification[]
+
+  @@unique([projectId, number])
+  @@index([orgId, key])
+  @@index([assigneeId])
+  @@index([statusId])
+  @@index([sprintId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  issueId   String
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Audit + Analytics engine (append-only) ─────────────────────
+
+model Activity {
+  id        String   @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  issueId   String?
+  issue     Issue?   @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  projectId String?
+  type      String // issue.created | issue.updated | issue.status_changed | issue.assigned | comment.created | sprint.started | sprint.completed | project.created | member.joined
+  field     String?
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String // assigned | mentioned | status_changed | comment | due_soon | sprint
+  title     String
+  body      String?
+  issueId   String?
+  issue     Issue?   @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}

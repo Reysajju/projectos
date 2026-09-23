@@ -1,0 +1,68 @@
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import {
+  SESSION_COOKIE,
+  createSession,
+  hashPassword,
+  seedOrgDefaults,
+  sessionCookieOptions,
+} from "@/lib/auth";
+import { toOrgDTO, toUserDTO } from "@/lib/dto";
+import { ApiError, handle, jsonError, optStr, parseBody, reqStr } from "@/lib/api-helpers";
+
+export const dynamic = "force-dynamic";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export async function POST(req: NextRequest) {
+  return handle(async () => {
+    const body = await parseBody(req);
+    const email = reqStr(body, "email").toLowerCase();
+    const name = reqStr(body, "name");
+    const orgName = reqStr(body, "orgName");
+    const orgSlugInput = optStr(body, "orgSlug") ?? "";
+    const password = body.password;
+    if (typeof password !== "string" || password.length < 6) {
+      throw new ApiError("Password must be at least 6 characters", 400);
+    }
+    if (!EMAIL_RE.test(email)) throw new ApiError("Invalid email address", 400);
+
+    const existingUser = await db.user.findUnique({ where: { email } });
+    if (existingUser) return jsonError("Email already registered", 409);
+
+    // Slug: sanitize, then unique-ify by appending -2, -3, ... when taken.
+    const base = slugify(orgSlugInput) || slugify(orgName) || "workspace";
+    let slug = base;
+    let n = 2;
+    while (await db.organization.findUnique({ where: { slug } })) {
+      slug = `${base}-${n}`;
+      n += 1;
+      if (n > 99) {
+        slug = `${base}-${Date.now().toString(36)}`;
+        break;
+      }
+    }
+
+    const user = await db.user.create({
+      data: { email, name, passwordHash: hashPassword(password) },
+    });
+    const org = await db.organization.create({ data: { name: orgName, slug } });
+    await db.organizationMember.create({
+      data: { orgId: org.id, userId: user.id, role: "ADMIN" },
+    });
+    await seedOrgDefaults(org.id);
+
+    const token = await createSession(user.id);
+    const res = NextResponse.json({ user: toUserDTO(user), org: toOrgDTO(org) });
+    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    return res;
+  });
+}
