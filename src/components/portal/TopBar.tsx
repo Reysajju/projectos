@@ -39,6 +39,7 @@ const VIEW_TITLES: Record<string, string> = {
   projects: "Projects",
   search: "Advanced Search",
   automations: "Automation",
+  workflow: "Workflow Designer",
   team: "Team",
   settings: "Settings",
 };

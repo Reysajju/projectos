@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
-    const [statuses, types, priorities, labels, members, projects, sprints] = await Promise.all([
+    const [statuses, types, priorities, labels, members, projects, sprints, customFields] = await Promise.all([
       db.status.findMany({ where: { orgId }, select: { id: true, name: true } }),
       db.issueType.findMany({ where: { orgId }, select: { id: true, name: true } }),
       db.priority.findMany({ where: { orgId }, select: { id: true, name: true } }),
@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
         where: { project: { orgId } },
         select: { id: true, name: true },
       }),
+      db.customField.findMany({ where: { orgId }, select: { id: true, name: true, type: true } }),
     ]);
 
     const where = buildWhere(node, {
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest) {
       members,
       projects,
       sprints,
+      customFields,
     });
 
     const issues = await db.issue.findMany({

@@ -19,6 +19,7 @@ import { GlobalCreateProjectDialog } from "./ProjectDialog";
 import { SearchPalette } from "./SearchPalette";
 import { AdvancedSearchView } from "./AdvancedSearchView";
 import { AutomationsView } from "./AutomationsView";
+import { WorkflowDesignerView } from "./WorkflowDesignerView";
 import { Toaster } from "@/components/ui/sonner";
 
 type AuthState = "loading" | "anon" | "authed";
@@ -123,6 +124,8 @@ export function PortalApp() {
         return <AdvancedSearchView />;
       case "automations":
         return <AutomationsView />;
+      case "workflow":
+        return <WorkflowDesignerView />;
       case "settings":
         return <SettingsView />;
       default:

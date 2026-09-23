@@ -96,11 +96,11 @@ export const DEFAULT_ISSUE_TYPES = [
 ];
 
 export const DEFAULT_STATUSES = [
-  { name: "Backlog", category: "TODO", color: "#78716c", order: 0 },
-  { name: "To Do", category: "TODO", color: "#a8a29e", order: 1 },
-  { name: "In Progress", category: "IN_PROGRESS", color: "#d97706", order: 2 },
-  { name: "In Review", category: "IN_PROGRESS", color: "#7c3aed", order: 3 },
-  { name: "Done", category: "DONE", color: "#059669", order: 4 },
+  { name: "Backlog", category: "TODO", color: "#78716c", order: 0, isInitial: true },
+  { name: "To Do", category: "TODO", color: "#a8a29e", order: 1, isInitial: false },
+  { name: "In Progress", category: "IN_PROGRESS", color: "#d97706", order: 2, isInitial: false },
+  { name: "In Review", category: "IN_PROGRESS", color: "#7c3aed", order: 3, isInitial: false },
+  { name: "Done", category: "DONE", color: "#059669", order: 4, isInitial: false },
 ];
 
 export const DEFAULT_PRIORITIES = [

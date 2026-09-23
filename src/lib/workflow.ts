@@ -62,7 +62,10 @@ export function userLabel(u: Pick<User, "name"> | null | undefined) {
 
 /**
  * Transition an issue to a new status through the workflow engine.
- * Validates: status belongs to same org. Fires activity + notifications.
+ * Validates: status belongs to same org; transition is allowed by the
+ * org's workflow graph (if the org has defined any transitions — an org
+ * with zero transitions runs an open workflow where every move is legal).
+ * Fires activity + notifications.
  */
 export async function transitionIssue(params: {
   issueId: string;
@@ -81,8 +84,30 @@ export async function transitionIssue(params: {
   }
   if (newStatus.id === issue.statusId) return issue; // no-op
 
-  // Rule: DONE status can only be reached from IN_PROGRESS or TODO (single-hop validation demo)
-  // Any status → any other status is allowed; transitions are logged for audit.
+  // Workflow graph enforcement: only when the org has at least one
+  // explicit transition do we restrict moves.
+  const anyTransition = await db.workflowTransition.findFirst({
+    where: { orgId: issue.orgId },
+    select: { id: true },
+  });
+  if (anyTransition) {
+    const edge = await db.workflowTransition.findUnique({
+      where: {
+        orgId_fromStatusId_toStatusId: {
+          orgId: issue.orgId,
+          fromStatusId: issue.statusId,
+          toStatusId: newStatus.id,
+        },
+      },
+      select: { id: true },
+    });
+    if (!edge) {
+      throw new WorkflowError(
+        `Workflow does not allow moving from "${issue.status.name}" to "${newStatus.name}"`,
+        400
+      );
+    }
+  }
 
   const updated = await db.issue.update({
     where: { id: issue.id },

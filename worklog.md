@@ -291,3 +291,42 @@ Stage Summary:
 - Remaining from blueprint: workflow transition designer (visual), attachments, webhook/API-key admin UI, email digests, mentions-in-editor, JQL support for custom fields (fields/`cf.name` syntax), dashboard widget customization.
 - Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); agent-browser a11y refs go stale across Radix portal re-renders (use fresh snapshots per step); automation value selects show empty placeholder until clicked.
 - Recommended next: workflow designer UI (§12), attachments on issues, JQL custom-field bindings, board column manager merging WIP + status ordering.
+---
+Task ID: 11 (webDevReview round 3 — 2026-09-23 ~10:30 PKT)
+Agent: coordinator (cron review)
+Task: Assess → QA via agent-browser → fix bugs → Workflow designer + JQL cf.* + demo seed polish
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy (200), lint clean, no fresh console/API errors (old stale-Prisma 500s in dev.log self-healed via db.ts signature cache). Browser QA passed: auth → dashboard → board (WIP chips) → roadmap → issues table (4 custom columns) → JQL → dark mode all verified.
+- QA GAP FOUND: after the Task-10 reseed, AutomationsView and saved-filters were EMPTY in the demo (seed never included them) — demo looked unfinished. Fixed this round (below).
+
+FEATURES ADDED
+1. WORKFLOW DESIGNER (blueprint §12) — full engine + UI:
+   - Schema: `WorkflowTransition` model (orgId + fromStatusId + toStatusId, unique triple, cascade) + `Status.isInitial` flag; db:pushed.
+   - Engine (`src/lib/workflow.ts`): transitionIssue now enforces the graph — if the org has ≥1 transition, only connected moves pass (else 400 with human message `Workflow does not allow moving from "X" to "Y"`); org with 0 transitions = open workflow (back-compat). issues POST default status now prefers `isInitial` status.
+   - API: GET /api/workflow (statuses+counts+transitions+restricted flag); POST /api/workflow/transitions (409 dup, self-loop 400); DELETE /api/workflow/transitions/[id]; POST /api/statuses (case-insensitive unique, category+color); PATCH /api/statuses/[statusId] (rename/category/color/isInitial single-initial swap); DELETE /api/statuses/[statusId]?moveTo= (moves issues, cascade-clean transitions, guarantees one initial status remains). Writes ADMIN/MANAGER only.
+   - UI (`WorkflowDesignerView.tsx` ~700 lines): deterministic 3-column graph (TODO/IN_PROGRESS/DONE) with SVG bezier edges, dashed strokes + animated flow dots, hover-to-delete edges; "Connect statuses" two-click mode (source→target, highlighted nodes, dimmed non-targets); New/Edit status dialogs (name/category/color swatches/initial switch; delete with moveTo select + auto fallback); transitions list with category labels + "Reset to open workflow"; Open (emerald) vs Restricted (amber) banner. Sidebar entry "Workflow" (manageOnly). TopBar title. Wired into PortalApp + store PortalView.
+2. WORKFLOW-AWARE BOARD + PANEL UX:
+   - `use-workflow.ts` shared hook (module-level cache + invalidateWorkflowCache) feeding BoardView and IssuePanel.
+   - BoardView: onDragEnd pre-guard — illegal move shows toast.info("Not allowed by your workflow" + from→to) BEFORE optimistic update (no flicker); during drag, unreachable columns dim (opacity-45 saturate-50, aria noted).
+   - IssuePanel: status select disables unreachable statuses with "(workflow)" hint (WorkflowStatusSelect component).
+3. JQL CUSTOM FIELDS: `cf.<Name>` / `customfield.<Name>` lexer+parser+resolver in jql.ts; per-type matching (TEXT/SELECT/DATE quoted-needle, NUMBER/CHECKBOX validated, `none`/`empty` unset check); /api/search/advanced loads CustomField defs into ctx. Verified: `cf.environment = Production` → WEB-9; unknown cf field → empty set (no crash).
+4. DEMO SEED: 3 automation rules ("Escalate critical bugs" enabled, "Alert assignee on review" enabled, "Flag design work" disabled w/ run stats) + 3 saved filters ("My open bugs", "Overdue & unfinished", "Sprint work in progress") + 9-edge restricted demo workflow graph (every sensible move legal; Backlog→Done rejected) + Backlog isInitial. DEFAULT_STATUSES in auth.ts now carries isInitial for new orgs.
+
+BUGS FOUND & FIXED
+- BUG 9: WorkflowDesigner graph container collapsed to 0 height (absolutely-positioned children + SVG give no height) → only column headers visible. FIX: explicit minWidth/height from layout() on the relative container; column headers switched to absolute per-column positioning.
+- BUG 10: status duplicate check was case-sensitive exact-match → "blocked / waiting" created despite "Blocked / Waiting" (SQLite has no insensitive mode). FIX: JS-side lowercase compare against all org statuses in POST + PATCH /api/statuses.
+- BUG 11: deleting the only isInitial status left the org with no initial status. FIX: DELETE transaction re-marks the target status as initial when none remains.
+- Cleanup: removed junk test statuses; restored AI-9/WEB-13 used in enforcement tests.
+
+VERIFICATION (API + browser)
+- Enforcement e2e: created edge → restricted=true; legal Backlog→Done 200; forbidden Done→In Progress 400 with message; dup edge 409; delete edge → open again. Status CRUD: create/rename/409-dup/delete-with-moveTo all 200/409/200. isInitial preserved exactly one.
+- Browser (agent-browser): designer graph renders (light+dark, nodes/counts/START badge/animated edges/backward loops); connect flow: Cancel-connect state → Backlog(source) → hint "pick the target" → In Progress → toast "Transition added" + restricted banner + edge drawn; New status dialog created "Blocked" (toast, node appears, 0 issues); edit→delete→confirm removed it; transitions list rows + Reset-to-open present; IssuePanel status select shows In Review/Done disabled with "(workflow)"; board drag WEB-13 To Do→In Progress persisted (200 via API), illegal WEB-17 Backlog→Done blocked and card stayed; dark mode designer clean; mobile 390=390 no overflow; lint clean; GET / 200.
+
+Stage Summary:
+- Blueprint §12 (workflow designer) SHIPPED: DB graph → engine enforcement → API → visual designer → board/panel UX integration. JQL gained cf.<Name>. Demo org now shows populated Automation + saved filters + a realistic restricted workflow.
+- Project tab order unchanged: Board | Backlog | Roadmap | Issues | Reports | Settings. Sidebar: Dashboard, Projects, Search, Automation, Workflow (ADMIN/MANAGER), Team, Settings.
+- Remaining from blueprint: attachments (S3-style), webhook/API-key admin UI, email digests, mentions-in-editor, dashboard widget customization, board column manager merging WIP + status ordering.
+- Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); same-column/long-range edges can visually overlap when many edges share endpoints (cosmetic); dev-tools overlay can intercept clicks in preview (dev-only).
+- Recommended next: attachments on issues, board column manager (merge WIP + workflow), email digest cron, webhook admin UI.

@@ -439,3 +439,27 @@ export interface CustomFieldPatchBody {
   order?: number;
   options?: string[];
 }
+
+// ─── Workflow designer ──────────────────────────────────────
+
+export interface WorkflowStatusDTO {
+  id: string;
+  name: string;
+  category: StatusCategory;
+  color: string;
+  order: number;
+  isInitial: boolean;
+  issueCount: number;
+}
+
+export interface WorkflowTransitionDTO {
+  id: string;
+  fromStatusId: string;
+  toStatusId: string;
+}
+
+export interface WorkflowPayload {
+  statuses: WorkflowStatusDTO[];
+  transitions: WorkflowTransitionDTO[];
+  restricted: boolean;
+}

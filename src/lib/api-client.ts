@@ -33,6 +33,10 @@ import type {
   CustomFieldsPayload,
   CustomFieldDTO,
   CustomFieldType,
+  WorkflowPayload,
+  WorkflowTransitionDTO,
+  WorkflowStatusDTO,
+  StatusCategory,
 } from "./portal-types";
 
 export class ApiError extends Error {
@@ -212,4 +216,30 @@ export const api2 = {
   ) => apiFetch<{ rule: AutomationRuleDTO }>(`/api/automations/${id}`, jsonBody(body, "PATCH")),
   deleteAutomation: (id: string) =>
     apiFetch<Record<string, never>>(`/api/automations/${id}`, { method: "DELETE" }),
+};
+
+// ─── Workflow designer / statuses ───────────────────────────────
+
+export const api3 = {
+  workflow: () => apiFetch<WorkflowPayload>("/api/workflow"),
+
+  createTransition: (body: { fromStatusId: string; toStatusId: string }) =>
+    apiFetch<{ transition: WorkflowTransitionDTO }>("/api/workflow/transitions", jsonBody(body, "POST")),
+
+  deleteTransition: (id: string) =>
+    apiFetch<Record<string, never>>(`/api/workflow/transitions/${id}`, { method: "DELETE" }),
+
+  createStatus: (body: { name: string; category: StatusCategory; color?: string }) =>
+    apiFetch<{ status: WorkflowStatusDTO }>("/api/statuses", jsonBody(body, "POST")),
+
+  patchStatus: (
+    id: string,
+    body: { name?: string; category?: StatusCategory; color?: string; isInitial?: boolean }
+  ) => apiFetch<{ status: WorkflowStatusDTO }>(`/api/statuses/${id}`, jsonBody(body, "PATCH")),
+
+  deleteStatus: (id: string, moveTo?: string) =>
+    apiFetch<{ movedTo: string }>(
+      `/api/statuses/${id}${moveTo ? `?moveTo=${encodeURIComponent(moveTo)}` : ""}`,
+      { method: "DELETE" }
+    ),
 };

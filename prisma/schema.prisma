@@ -63,6 +63,7 @@ model Organization {
   savedFilters  SavedFilter[]
   automationRules AutomationRule[]
   customFields  CustomField[]
+  workflowTransitions WorkflowTransition[]
 }
 
 model OrganizationMember {
@@ -125,8 +126,29 @@ model Status {
   category String // TODO | IN_PROGRESS | DONE
   color    String
   order    Int    @default(0)
+  isInitial Boolean @default(false) // where new issues land
 
-  issues Issue[]
+  issues           Issue[]
+  transitionsFrom  WorkflowTransition[] @relation("TransitionsFrom")
+  transitionsTo    WorkflowTransition[] @relation("TransitionsTo")
+
+  @@unique([orgId, name])
+}
+
+// Directed edges of the org workflow graph: fromStatus → toStatus.
+// If an org has NO transitions defined, all status moves are allowed
+// (open workflow). Defining any transition switches the org to a
+// restricted workflow.
+model WorkflowTransition {
+  id           String @id @default(cuid())
+  orgId        String
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  fromStatusId String
+  fromStatus   Status @relation("TransitionsFrom", fields: [fromStatusId], references: [id], onDelete: Cascade)
+  toStatusId   String
+  toStatus     Status @relation("TransitionsTo", fields: [toStatusId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, fromStatusId, toStatusId])
 }
 
 model Priority {

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Archive, Check, ChevronRight, LayoutDashboard, LogOut, Menu, Monitor, Moon, Search, Settings, Sun, UserCircle2, Users, Zap } from "lucide-react";
+import { Archive, Check, ChevronRight, GitBranch, LayoutDashboard, LogOut, Menu, Monitor, Moon, Search, Settings, Sun, UserCircle2, Users, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 
@@ -21,11 +21,12 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ProjectIcon } from "./IssueTypeIcon";
 
-const NAV: { view: PortalView; label: string; icon: typeof LayoutDashboard }[] = [
+const NAV: { view: PortalView; label: string; icon: typeof LayoutDashboard; manageOnly?: boolean }[] = [
   { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { view: "projects", label: "Projects", icon: Archive },
   { view: "search", label: "Search", icon: Search },
   { view: "automations", label: "Automation", icon: Zap },
+  { view: "workflow", label: "Workflow", icon: GitBranch, manageOnly: true },
   { view: "team", label: "Team", icon: Users },
   { view: "settings", label: "Settings", icon: Settings },
 ];
@@ -70,6 +71,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const org = usePortalStore((s) => s.org);
   const me = usePortalStore((s) => s.me);
   const role = usePortalStore((s) => s.role);
+  const canManage = role === "ADMIN" || role === "MANAGER";
   const workspace = usePortalStore((s) => s.workspace);
   const view = usePortalStore((s) => s.view);
   const activeProjectId = usePortalStore((s) => s.activeProjectId);
@@ -126,7 +128,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Nav */}
       <nav aria-label="Main navigation" className="flex flex-col gap-0.5 px-2 pt-3">
-        {NAV.map((item) => {
+        {NAV.filter((item) => !item.manageOnly || canManage).map((item) => {
           const active = view === item.view;
           return (
             <button

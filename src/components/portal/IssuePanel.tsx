@@ -37,6 +37,7 @@ import { KeyBadge } from "./KeyBadge";
 import { PriorityIcon } from "./PriorityIcon";
 import { RelativeTime, formatDate } from "./RelativeTime";
 import { CustomFieldValue } from "./CustomFieldValue";
+import { useWorkflowData } from "./use-workflow";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -424,24 +425,7 @@ export function IssuePanel() {
                 <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Properties</Label>
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border p-3">
                   <Field label="Status">
-                    <Select value={issue.statusId} onValueChange={(v) => void patch({ statusId: v }, { silent: true })}>
-                      <SelectTrigger size="sm" className="w-full" aria-label="Status">
-                        <span className="flex items-center gap-1.5">
-                          <span className="size-2 rounded-full" style={{ backgroundColor: issue.status.color }} aria-hidden />
-                          {issue.status.name}
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {statuses.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            <span className="flex items-center gap-2">
-                              <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
-                              {s.name}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <WorkflowStatusSelect issue={issue} statuses={statuses} onStatusChange={(statusId) => void patch({ statusId }, { silent: true })} />
                   </Field>
 
                   <Field label="Assignee">
@@ -905,5 +889,50 @@ export function IssuePanel() {
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+// ─── Workflow-aware status select ───────────────────────────────
+// When the org runs a restricted workflow, statuses that are not
+// reachable from the issue's current status are shown but disabled.
+
+function WorkflowStatusSelect({
+  issue,
+  statuses,
+  onStatusChange,
+}: {
+  issue: IssueDTO;
+  statuses: StatusDTO[];
+  onStatusChange: (statusId: string) => void;
+}) {
+  const { canMove } = useWorkflowData();
+  return (
+    <Select
+      value={issue.statusId}
+      onValueChange={onStatusChange}
+    >
+      <SelectTrigger size="sm" className="w-full" aria-label="Status">
+        <span className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full" style={{ backgroundColor: issue.status.color }} aria-hidden />
+          {issue.status.name}
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        {statuses.map((s) => {
+          const allowed = canMove(issue.statusId, s.id);
+          return (
+            <SelectItem key={s.id} value={s.id} disabled={!allowed}>
+              <span className="flex items-center gap-2">
+                <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+                {s.name}
+                {!allowed && (
+                  <span className="text-[10px] text-muted-foreground/70">(workflow)</span>
+                )}
+              </span>
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
   );
 }

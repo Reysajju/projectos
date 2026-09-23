@@ -10,7 +10,8 @@
  *   OP      := '=' | '!=' | '~' (contains)
  *
  * Fields: status, type, priority, assignee, reporter, sprint, project,
- *         summary, description, label, points, due, created, updated
+ *         summary, description, label, points, due, created, updated,
+ *         cf.<Name> / customfield.<Name> (org custom fields)
  * Values: quoted "multi word", bare-word, `me`, `none`, `anyone`, `overdue`,
  *         `7d` style relative days (created/updated), numbers for points.
  */
@@ -79,6 +80,14 @@ function tokenize(input: string): Token[] {
     let j = i;
     while (j < input.length && !/[\s()=!~]/.test(input[j])) j++;
     const word = input.slice(i, j);
+    // Custom fields: cf.<Name> or customfield.<Name> — kept as-is here;
+    // resolution against org CustomField definitions happens in buildWhere.
+    const cfMatch = word.match(/^(?:cf|customfield)[.:](.+)$/);
+    if (cfMatch) {
+      tokens.push({ type: "field", value: `cf:${cfMatch[1].toLowerCase()}`, pos: i });
+      i = j;
+      continue;
+    }
     if (!word) throw new JqlError(`Unexpected character "${ch}"`, i);
     const upper = word.toUpperCase();
     if (upper === "AND") tokens.push({ type: "and", value: word, pos: i });
@@ -125,8 +134,8 @@ export function parseJql(input: string): JqlNode {
       return node;
     }
     if (t.type !== "field") throw new JqlError(`Expected a field, got "${t.value}"`, t.pos);
-    if (!JQL_FIELDS.includes(t.value as (typeof JQL_FIELDS)[number])) {
-      throw new JqlError(`Unknown field "${t.value}". Try: ${JQL_FIELDS.join(", ")}`, t.pos);
+    if (!t.value.startsWith("cf:") && !JQL_FIELDS.includes(t.value as (typeof JQL_FIELDS)[number])) {
+      throw new JqlError(`Unknown field "${t.value}". Try: ${JQL_FIELDS.join(", ")} or cf.<Name> for custom fields`, t.pos);
     }
     p++;
     const op = peek();
@@ -163,6 +172,7 @@ export interface JqlContext {
   members: { userId: string; user: { name: string; email: string } }[];
   projects: { id: string; key: string; name: string }[];
   sprints: { id: string; name: string }[];
+  customFields: { id: string; name: string; type: string }[];
 }
 
  
@@ -181,7 +191,55 @@ function resolveUser(value: string, ctx: JqlContext): string[] | null {
   return null;
 }
 
+/**
+ * Custom-field clauses: cf.<Name> OP VALUE.
+ * Issue.customFields is a JSON string map { customFieldId: value }.
+ * We match with `contains` against the JSON-encoded fragment — pragmatic
+ * for the lite engine (values are JSON-stringified so quotes anchor matches).
+ */
+function cfClauseToWhere(c: JqlClause, ctx: JqlContext): Where {
+  const cfName = c.field.slice(3).toLowerCase();
+  const def = ctx.customFields.find((f) => f.name.toLowerCase() === cfName);
+  if (!def) return { id: "__none__" };
+
+  const raw = c.value;
+  const v = raw.toLowerCase();
+  const not = c.op === "!=";
+  const key = `"${def.id}":`;
+
+  // Unset check: value "none"/"empty" → field key absent from the map.
+  if (v === "none" || v === "empty") {
+    return not
+      ? { customFields: { contains: key } }
+      : { OR: [{ customFields: null }, { customFields: { not: { contains: key } } }] };
+  }
+
+  // Normalize the stored value by field type. The map stores every value
+  // as a JSON string (String(value) on write), so the needle is quoted.
+  let needle: string;
+  if (def.type === "CHECKBOX") {
+    if (v !== "true" && v !== "false") return { id: "__none__" };
+    needle = `${key}"${v}"`;
+  } else if (def.type === "NUMBER") {
+    const n = Number(raw);
+    if (Number.isNaN(n)) return { id: "__none__" };
+    needle = `${key}"${String(n)}"`;
+  } else {
+    needle = `${key}"${raw}"`;
+  }
+
+  if (not) {
+    return { OR: [{ customFields: null }, { customFields: { not: { contains: needle } } }] };
+  }
+  // `~` on TEXT/SELECT/DATE gets prefix matching for free via contains.
+  if (c.op === "~" && (def.type === "TEXT" || def.type === "SELECT" || def.type === "DATE")) {
+    return { customFields: { contains: `${key}"${raw}` } };
+  }
+  return { customFields: { contains: needle } };
+}
+
 function clauseToWhere(c: JqlClause, ctx: JqlContext): Where {
+  if (c.field.startsWith("cf:")) return cfClauseToWhere(c, ctx);
   const field = c.field;
   const raw = c.value;
   const v = raw.toLowerCase();

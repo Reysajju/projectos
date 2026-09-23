@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { IssueCardBody } from "./IssueCard";
 import { FilterBar, matchesFilters, useIssueFilters } from "./issue-filters";
 import { useProjectData } from "./project-data";
+import { useWorkflowData } from "./use-workflow";
 import { Gauge, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -76,23 +77,26 @@ function BoardColumn({
   limit,
   onOpenIssue,
   onNewIssue,
+  dropBlocked,
 }: {
   status: StatusDTO;
   issues: IssueDTO[];
   limit?: number;
   onOpenIssue: (id: string) => void;
   onNewIssue: () => void;
+  dropBlocked?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${status.id}` });
   const atLimit = limit != null && issues.length >= limit;
   const overLimit = limit != null && issues.length > limit;
   return (
     <section
-      aria-label={`Column ${status.name}${limit != null ? `, WIP limit ${limit}` : ""}`}
+      aria-label={`Column ${status.name}${limit != null ? `, WIP limit ${limit}` : ""}${dropBlocked ? ", not allowed by workflow" : ""}`}
       className={cn(
-        "flex w-[280px] shrink-0 flex-col rounded-lg bg-muted/80 ring-1 ring-border sm:w-72",
+        "flex w-[280px] shrink-0 flex-col rounded-lg bg-muted/80 ring-1 ring-border transition-opacity sm:w-72",
         overLimit && "ring-rose-500/50",
-        isOver && overLimit && "ring-2 ring-rose-500/70"
+        isOver && overLimit && "ring-2 ring-rose-500/70",
+        dropBlocked && "opacity-45 saturate-50"
       )}
     >
       <header className="flex items-center gap-2 px-3 pb-1 pt-3">
@@ -152,6 +156,7 @@ export function BoardView() {
   const openCreateIssue = usePortalStore((s) => s.openCreateIssue);
   const activeProjectId = usePortalStore((s) => s.activeProjectId);
   const canManage = useCanManage();
+  const { workflow, canMove } = useWorkflowData();
   const { filters, patch } = useIssueFilters();
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const [wipOpen, setWipOpen] = useState(false);
@@ -232,6 +237,17 @@ export function BoardView() {
     const changedStatus = targetStatusId !== issue.statusId;
     const changedOrder = Math.abs(newOrder - issue.order) >= 0.0001;
     if (!changedStatus && !changedOrder) return;
+
+    // Workflow graph guard: reject moves not allowed by the org's workflow
+    // before any optimistic update, so the card never flickers.
+    if (!canMove(issue.statusId, targetStatusId)) {
+      const targetStatus = statuses.find((s) => s.id === targetStatusId);
+      const fromStatus = statuses.find((s) => s.id === issue.statusId);
+      toast.info("Not allowed by your workflow", {
+        description: `${issue.key}: ${fromStatus?.name ?? "?"} → ${targetStatus?.name ?? "?"} is not a connected transition. An admin can adjust it in Workflow.`,
+      });
+      return;
+    }
 
     const status = statuses.find((s) => s.id === targetStatusId);
     if (!status) return;
@@ -315,6 +331,12 @@ export function BoardView() {
                 status={status}
                 issues={byStatus.get(status.id) ?? []}
                 limit={data.project.wipLimits?.[status.id]}
+                dropBlocked={
+                  workflow?.restricted &&
+                  !!activeIssue &&
+                  status.id !== activeIssue.statusId &&
+                  !canMove(activeIssue.statusId, status.id)
+                }
                 onOpenIssue={setOpenIssue}
                 onNewIssue={() => openCreateIssue({ kind: "project", projectId: data.project.id })}
               />

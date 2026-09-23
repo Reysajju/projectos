@@ -86,7 +86,9 @@ export async function POST(req: NextRequest) {
     const storyPoints = storyRaw == null ? null : Math.max(0, Math.round(storyRaw));
     const dueDate = optDateOrNull(body, "dueDate") ?? null;
 
-    const defaultStatus = await db.status.findFirst({ where: { orgId }, orderBy: { order: "asc" } });
+    const defaultStatus =
+      (await db.status.findFirst({ where: { orgId, isInitial: true } })) ??
+      (await db.status.findFirst({ where: { orgId }, orderBy: { order: "asc" } }));
     if (!defaultStatus) throw new ApiError("Workspace has no statuses configured", 400);
 
     // ── Create: number = max per project + 1, computed inside a transaction ──

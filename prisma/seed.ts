@@ -86,6 +86,28 @@ async function main() {
     data: { wipLimits: JSON.stringify({ [S("In Progress")]: 4, [S("In Review")]: 3 }) },
   });
 
+  // ─── Workflow transitions (restricted demo graph) ─────────────
+  // A realistic software workflow: every sensible move is an edge,
+  // odd jumps (e.g. Backlog → Done) are rejected by the engine.
+  const FLOW_EDGES: [string, string][] = [
+    ["Backlog", "To Do"],
+    ["Backlog", "In Progress"],
+    ["To Do", "In Progress"],
+    ["To Do", "Backlog"],
+    ["In Progress", "In Review"],
+    ["In Progress", "To Do"],
+    ["In Review", "Done"],
+    ["In Review", "In Progress"],
+    ["Done", "In Progress"],
+  ];
+  await db.workflowTransition.createMany({
+    data: FLOW_EDGES.map(([from, to]) => ({
+      orgId: org.id,
+      fromStatusId: S(from),
+      toStatusId: S(to),
+    })),
+  });
+
   // ─── Issue factory ────────────────────────────────────────────
   const counters: Record<string, number> = {};
   async function mk(opts: {
@@ -247,6 +269,81 @@ async function main() {
       { orgId: org.id, userId: marcus.id, projectId: app.id, type: "sprint.started", newValue: appS1.name, createdAt: daysAgo(3) },
       { orgId: org.id, userId: marcus.id, userId2: undefined, type: "member.joined", newValue: "Lena Brandt", createdAt: daysAgo(20) } as never,
     ].map(({ userId2: _drop, ...rest }) => rest),
+  });
+
+  // ═══ Automation rules (demo) ═════════════════════════════════
+  await db.automationRule.createMany({
+    data: [
+      {
+        orgId: org.id,
+        name: "Escalate critical bugs",
+        trigger: "issue.created",
+        conditions: JSON.stringify([{ field: "type", operator: "equals", value: "Bug" }]),
+        actions: JSON.stringify([
+          { type: "set_priority", value: "High" },
+          { type: "add_label", value: "security" },
+        ]),
+        enabled: true,
+        runCount: 6,
+        lastRunAt: daysAgo(1),
+        lastRunResult: "priority → High, label +security",
+        createdBy: sarah.id,
+        createdAt: daysAgo(18),
+      },
+      {
+        orgId: org.id,
+        name: "Alert assignee on review",
+        trigger: "issue.status_changed",
+        conditions: JSON.stringify([]),
+        actions: JSON.stringify([{ type: "notify_assignee" }]),
+        enabled: true,
+        runCount: 21,
+        lastRunAt: daysAgo(0.4),
+        lastRunResult: "notified assignee",
+        createdBy: marcus.id,
+        createdAt: daysAgo(14),
+      },
+      {
+        orgId: org.id,
+        name: "Flag design work",
+        trigger: "issue.assigned",
+        conditions: JSON.stringify([{ field: "assignee", operator: "equals", value: lena.email }]),
+        actions: JSON.stringify([{ type: "add_label", value: "design" }]),
+        enabled: false,
+        runCount: 3,
+        lastRunAt: daysAgo(5),
+        lastRunResult: "label +design",
+        createdBy: sarah.id,
+        createdAt: daysAgo(10),
+      },
+    ],
+  });
+
+  // ═══ Saved filters (demo) ════════════════════════════════════
+  await db.savedFilter.createMany({
+    data: [
+      {
+        orgId: org.id,
+        name: "My open bugs",
+        query: 'assignee = "me" AND type = Bug AND status != Done',
+        ownerId: sarah.id,
+        createdAt: daysAgo(9),
+      },
+      {
+        orgId: org.id,
+        name: "Overdue & unfinished",
+        query: "due = overdue AND status != Done",
+        ownerId: sarah.id,
+        createdAt: daysAgo(6),
+      },
+      {
+        orgId: org.id,
+        name: "Sprint work in progress",
+        query: "sprint = active AND status != Done",
+        ownerId: marcus.id,
+        createdAt: daysAgo(4),
+      },
+    ],
   });
 
   // ─── Backdate timestamps for charts (burndown / created-vs-resolved) ──
