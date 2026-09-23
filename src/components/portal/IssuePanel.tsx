@@ -6,6 +6,7 @@ import {
   ArrowLeftRight,
   AtSign,
   CalendarClock,
+  CalendarRange,
   CheckCheck,
   Copy,
   GitBranch,
@@ -35,6 +36,7 @@ import { IssueTypeIcon } from "./IssueTypeIcon";
 import { KeyBadge } from "./KeyBadge";
 import { PriorityIcon } from "./PriorityIcon";
 import { RelativeTime, formatDate } from "./RelativeTime";
+import { CustomFieldValue } from "./CustomFieldValue";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -108,6 +110,7 @@ export function IssuePanel() {
   const [subtaskDraft, setSubtaskDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
 
   const issue = detail?.issue ?? null;
   const members = useMemo(() => workspace?.members ?? [], [workspace]);
@@ -121,6 +124,7 @@ export function IssuePanel() {
     [workspace]
   );
   const labels = useMemo(() => workspace?.labels ?? [], [workspace]);
+  const customFieldDefs = useMemo(() => workspace?.customFields ?? [], [workspace]);
 
   const load = useCallback(async (id: string) => {
     setLoading(true);
@@ -533,6 +537,47 @@ export function IssuePanel() {
                     />
                   </Field>
 
+                  <Field label="Start date">
+                    <div className="flex items-center gap-1">
+                      <Popover open={startOpen} onOpenChange={setStartOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className={cn("h-8 flex-1 justify-start font-normal", !issue.startDate && "text-muted-foreground/80")}
+                            aria-label="Start date"
+                          >
+                            <CalendarRange className="size-3.5 text-muted-foreground/80" aria-hidden />
+                            {issue.startDate ? formatDate(issue.startDate) : "Set date"}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={issue.startDate ? new Date(issue.startDate) : undefined}
+                            disabled={issue.dueDate ? { after: new Date(issue.dueDate) } : undefined}
+                            onSelect={(d) => {
+                              setStartOpen(false);
+                              void patch({ startDate: d ? d.toISOString() : null }, { silent: true });
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      {issue.startDate && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0"
+                          aria-label="Clear start date"
+                          onClick={() => void patch({ startDate: null }, { silent: true })}
+                        >
+                          <Trash2 className="size-3.5" aria-hidden />
+                        </Button>
+                      )}
+                    </div>
+                  </Field>
+
                   <Field label="Due date">
                     <div className="flex items-center gap-1">
                       <Popover open={dueOpen} onOpenChange={setDueOpen}>
@@ -632,6 +677,29 @@ export function IssuePanel() {
                       </div>
                     </Field>
                   </div>
+
+                  {customFieldDefs.length > 0 && (
+                    <div className="col-span-2">
+                      <Field label="Custom fields">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+                          {customFieldDefs.map((def) => (
+                            <CustomFieldValue
+                              key={def.id}
+                              field={def}
+                              value={issue.customFields?.[def.id] ?? null}
+                              onChange={(value) => {
+                                if (!issue) return;
+                                const next = { ...(issue.customFields ?? {}) };
+                                if (value == null || value === "") delete next[def.id];
+                                else next[def.id] = value;
+                                void patch({ customFields: next }, { silent: true });
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </Field>
+                    </div>
+                  )}
 
                   <div className="col-span-2 grid grid-cols-2 gap-x-4 text-xs text-muted-foreground/80">
                     <span>Reporter: {issue.reporter?.name ?? "—"}</span>

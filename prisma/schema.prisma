@@ -62,6 +62,7 @@ model Organization {
   notifications Notification[]
   savedFilters  SavedFilter[]
   automationRules AutomationRule[]
+  customFields  CustomField[]
 }
 
 model OrganizationMember {
@@ -95,6 +96,9 @@ model Project {
 
   issues  Issue[]
   sprints Sprint[]
+
+  // JSON map { statusId: maxWipCount } for board column limits
+  wipLimits String?
 
   @@unique([orgId, key])
 }
@@ -197,10 +201,13 @@ model Issue {
   sprintId       String?
   sprint         Sprint?   @relation(fields: [sprintId], references: [id])
   storyPoints    Int?
+  startDate      DateTime?
   dueDate        DateTime?
   estimateHours  Float?
   remainingHours Float?
   order          Float     @default(0)
+  // JSON map { customFieldId: value } — values stored as strings
+  customFields   String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -274,6 +281,19 @@ model SavedFilter {
   query  String // JQL-lite string
   ownerId String
   owner  User   @relation("FilterOwner", fields: [ownerId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// ─── Custom fields engine (org-scoped definitions) ──────────────
+
+model CustomField {
+  id     String @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name   String
+  type   String // TEXT | NUMBER | DATE | SELECT | CHECKBOX
+  options String? // JSON string[] — SELECT choices only
+  order  Int    @default(0)
   createdAt DateTime @default(now())
 }
 

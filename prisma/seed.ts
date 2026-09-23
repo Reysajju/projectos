@@ -52,6 +52,12 @@ async function main() {
   });
   await seedOrgDefaults(org.id);
 
+  // ─── Custom fields (org-wide definitions) ─────────────────────
+  const cfEnv = await db.customField.create({ data: { orgId: org.id, name: "Environment", type: "SELECT", options: JSON.stringify(["Production", "Staging", "Development"]), order: 0 } });
+  await db.customField.create({ data: { orgId: org.id, name: "Release build", type: "TEXT", order: 1 } });
+  await db.customField.create({ data: { orgId: org.id, name: "Regression risk", type: "CHECKBOX", order: 2 } });
+  const cfGA = await db.customField.create({ data: { orgId: org.id, name: "GA window", type: "DATE", order: 3 } });
+
   const types = await db.issueType.findMany({ where: { orgId: org.id } });
   const statuses = await db.status.findMany({ where: { orgId: org.id } });
   const priorities = await db.priority.findMany({ where: { orgId: org.id } });
@@ -74,6 +80,12 @@ async function main() {
   const appS1 = await db.sprint.create({ data: { projectId: app.id, name: "APP Sprint 1", goal: "Auth flows + offline sync foundation.", startDate: daysAgo(3), endDate: daysAhead(11), status: "ACTIVE", order: 0 } });
   const appS2 = await db.sprint.create({ data: { projectId: app.id, name: "APP Sprint 2", goal: "Push notifications and app store release prep.", status: "FUTURE", order: 1 } });
 
+  // ─── Board WIP limits (WEB project) ───────────────────────────
+  await db.project.update({
+    where: { id: web.id },
+    data: { wipLimits: JSON.stringify({ [S("In Progress")]: 4, [S("In Review")]: 3 }) },
+  });
+
   // ─── Issue factory ────────────────────────────────────────────
   const counters: Record<string, number> = {};
   async function mk(opts: {
@@ -81,7 +93,7 @@ async function main() {
     type: string; summary: string; description?: string;
     status?: string; priority?: string; assignee?: typeof sarah | null;
     reporter?: typeof sarah; sprint?: string | null; points?: number | null;
-    due?: Date | null; labels?: string[]; parent?: { id: string };
+    due?: Date | null; start?: Date | null; labels?: string[]; parent?: { id: string };
     created?: Date; epicName?: string;
   }) {
     const number = (counters[opts.project.key] ?? 0) + 1;
@@ -101,6 +113,7 @@ async function main() {
         assigneeId: opts.assignee === undefined ? null : opts.assignee?.id ?? null,
         sprintId: opts.sprint ?? null,
         storyPoints: opts.points ?? null,
+        startDate: opts.start ?? null,
         dueDate: opts.due ?? null,
         parentId: opts.parent?.id ?? null,
         createdAt: opts.created ?? daysAgo(18 - (number % 15)),
@@ -124,8 +137,8 @@ async function main() {
   }
 
   // ═══ WEB project (20 issues) ══════════════════════════════════
-  const webEpic1 = await mk({ project: web, type: "Epic", epicName: "", summary: "Design System 2.0", description: "Tokens, components and documentation for the new brand.", priority: "High", assignee: lena, sprint: null, points: null });
-  const webEpic2 = await mk({ project: web, type: "Epic", summary: "Marketing Site Relaunch", description: "New landing, pricing, about and blog — on the new design system.", priority: "Highest", assignee: sarah });
+  const webEpic1 = await mk({ project: web, type: "Epic", epicName: "", summary: "Design System 2.0", description: "Tokens, components and documentation for the new brand.", priority: "High", assignee: lena, sprint: null, points: null, start: daysAgo(21), due: daysAhead(10) });
+  const webEpic2 = await mk({ project: web, type: "Epic", summary: "Marketing Site Relaunch", description: "New landing, pricing, about and blog — on the new design system.", priority: "Highest", assignee: sarah, start: daysAgo(7), due: daysAhead(32) });
 
   const w1 = await mk({ project: web, type: "Story", summary: "Implement design tokens (colors, spacing, typography)", description: "Export Figma variables to CSS custom properties and Tailwind theme.\n\n- [x] Color ramp\n- [x] Spacing scale\n- [ ] Dark mode ramp", status: "Done", priority: "High", assignee: lena, sprint: webS1.id, points: 8, labels: ["design", "frontend"], created: daysAgo(20) });
   const w2 = await mk({ project: web, type: "Story", summary: "New landing page hero with product animation", description: "Lottie-based hero animation, reduced-motion fallback.", status: "Done", priority: "Highest", assignee: aisha, sprint: webS1.id, points: 5, labels: ["frontend", "design"] });
@@ -136,8 +149,8 @@ async function main() {
   await move(w3, aisha, "To Do", "Done", 12);
   await move(w4, tom, "In Review", "Done", 8);
 
-  const w5 = await mk({ project: web, type: "Story", summary: "Pricing page with plan comparison table", description: "Three tiers, monthly/annual toggle, FAQ accordion.", status: "In Progress", priority: "High", assignee: aisha, sprint: webS2.id, points: 8, due: daysAhead(4), labels: ["frontend", "design"] });
-  const w6 = await mk({ project: web, type: "Task", summary: "Migrate blog to MDX pipeline", status: "In Progress", priority: "Medium", assignee: marcus, sprint: webS2.id, points: 5, due: daysAhead(6), labels: ["backend"] });
+  const w5 = await mk({ project: web, type: "Story", summary: "Pricing page with plan comparison table", description: "Three tiers, monthly/annual toggle, FAQ accordion.", status: "In Progress", priority: "High", assignee: aisha, sprint: webS2.id, points: 8, start: daysAgo(6), due: daysAhead(4), labels: ["frontend", "design"] });
+  const w6 = await mk({ project: web, type: "Task", summary: "Migrate blog to MDX pipeline", status: "In Progress", priority: "Medium", assignee: marcus, sprint: webS2.id, points: 5, start: daysAgo(4), due: daysAhead(6), labels: ["backend"] });
   const w7 = await mk({ project: web, type: "Task", summary: "Performance budget: Lighthouse ≥ 95 on mobile", description: "Image optimization, font subsetting, route prefetch audit.", status: "In Progress", priority: "Highest", assignee: aisha, sprint: webS2.id, points: 5, due: daysAhead(2), labels: ["performance"] });
   const w8 = await mk({ project: web, type: "Story", summary: "Testimonials carousel with customer logos", status: "In Review", priority: "Low", assignee: lena, sprint: webS2.id, points: 3, labels: ["design", "frontend"] });
   const w9 = await mk({ project: web, type: "Bug", summary: "Annual toggle shows wrong discount on pricing", status: "In Review", priority: "High", assignee: aisha, sprint: webS2.id, points: 2, due: daysAhead(1), labels: ["frontend"] });
@@ -154,10 +167,10 @@ async function main() {
   await move(w5a, aisha, "To Do", "Done", 2);
 
   // ═══ APP project (15 issues) ══════════════════════════════════
-  const appEpic1 = await mk({ project: app, type: "Epic", summary: "Offline-first sync engine", description: "Local queue, conflict resolution, background refresh.", priority: "Highest", assignee: marcus });
+  const appEpic1 = await mk({ project: app, type: "Epic", summary: "Offline-first sync engine", description: "Local queue, conflict resolution, background refresh.", priority: "Highest", assignee: marcus, start: daysAgo(3), due: daysAhead(25) });
   const a1 = await mk({ project: app, type: "Story", summary: "Biometric login (Face ID / fingerprint)", description: "expo-local-authentication, fallback to PIN.", status: "Done", priority: "High", assignee: marcus, sprint: appS1.id, points: 8, labels: ["backend", "security"], created: daysAgo(15) });
   const a2 = await mk({ project: app, type: "Task", summary: "React Native upgrade to 0.76 + New Architecture", status: "Done", priority: "High", assignee: aisha, sprint: appS1.id, points: 5, labels: ["frontend"] });
-  const a3 = await mk({ project: app, type: "Story", summary: "Local mutation queue with retry/backoff", status: "In Progress", priority: "Highest", assignee: marcus, sprint: appS1.id, points: 13, due: daysAhead(3), labels: ["backend"] });
+  const a3 = await mk({ project: app, type: "Story", summary: "Local mutation queue with retry/backoff", status: "In Progress", priority: "Highest", assignee: marcus, sprint: appS1.id, points: 13, start: daysAgo(3), due: daysAhead(3), labels: ["backend"] });
   const a4 = await mk({ project: app, type: "Story", summary: "Conflict resolution UI for stale edits", status: "In Progress", priority: "High", assignee: aisha, sprint: appS1.id, points: 8, due: daysAhead(5), labels: ["ux", "frontend"] });
   const a5 = await mk({ project: app, type: "Bug", summary: "Sync stalls when app backgrounded on Android", status: "In Review", priority: "High", assignee: tom, sprint: appS1.id, points: 3, due: daysAhead(2), labels: ["backend", "performance"] });
   const a6 = await mk({ project: app, type: "Task", summary: "Design offline indicator + sync status banner", status: "In Review", priority: "Medium", assignee: lena, sprint: appS1.id, points: 2, labels: ["design"] });
@@ -169,15 +182,33 @@ async function main() {
   const a12 = await mk({ project: app, type: "Task", summary: "Crash reporting + release health dashboard", status: "Backlog", priority: "Medium", assignee: marcus, points: 3, labels: ["backend"] });
 
   // ═══ AI project (10 issues) ═══════════════════════════════════
-  const aiEpic1 = await mk({ project: ai, type: "Epic", summary: "Semantic Search v1", description: "Embeddings pipeline + hybrid retrieval + evaluation harness.", priority: "High", assignee: aisha });
+  const aiEpic1 = await mk({ project: ai, type: "Epic", summary: "Semantic Search v1", description: "Embeddings pipeline + hybrid retrieval + evaluation harness.", priority: "High", assignee: aisha, start: daysAgo(5), due: daysAhead(21) });
   const i1 = await mk({ project: ai, type: "Task", summary: "Choose vector store (pgvector vs Qdrant benchmark)", description: "Benchmark recall@10 and p95 latency on 1M fixture vectors.", status: "Done", priority: "High", assignee: marcus, points: 5, labels: ["backend"], created: daysAgo(10) });
-  const i2 = await mk({ project: ai, type: "Story", summary: "Embedding pipeline for issue text", status: "In Progress", priority: "Highest", assignee: aisha, points: 8, due: daysAhead(9), labels: ["backend"] });
+  const i2 = await mk({ project: ai, type: "Story", summary: "Embedding pipeline for issue text", status: "In Progress", priority: "Highest", assignee: aisha, points: 8, start: daysAgo(5), due: daysAhead(9), labels: ["backend"] });
   const i3 = await mk({ project: ai, type: "Story", summary: "Hybrid retrieval (BM25 + vector) with reranking", status: "To Do", priority: "High", assignee: marcus, points: 13, labels: ["backend", "performance"] });
   const i4 = await mk({ project: ai, type: "Task", summary: "Evaluation harness with golden dataset", status: "In Progress", priority: "Medium", assignee: tom, points: 5, labels: ["backend"] });
   const i5 = await mk({ project: ai, type: "Bug", summary: "Tokenizer drops non-ASCII issue summaries", status: "In Review", priority: "Medium", assignee: aisha, points: 2, labels: ["backend"] });
   const i6 = await mk({ project: ai, type: "Story", summary: "Copilot: draft issue from Slack thread", status: "Backlog", priority: "Medium", assignee: null, points: 8, labels: ["backend", "ux"] });
   const i7 = await mk({ project: ai, type: "Task", summary: "Cost dashboard for embedding API usage", status: "Backlog", priority: "Low", assignee: null, points: 3, labels: ["frontend"] });
   const i8 = await mk({ project: ai, type: "Task", summary: "Security review: PII scrubbing before indexing", status: "Backlog", priority: "Highest", assignee: null, points: 5, labels: ["security"], due: daysAhead(8) });
+
+  // ═══ Custom field values on select issues ═════════════
+  await db.issue.update({
+    where: { id: w7.id },
+    data: { customFields: JSON.stringify({ [cfEnv.id]: "Production", [cfGA.id]: daysAhead(45).toISOString() }) },
+  });
+  await db.issue.update({
+    where: { id: w9.id },
+    data: { customFields: JSON.stringify({ [cfEnv.id]: "Staging" }) },
+  });
+  await db.issue.update({
+    where: { id: a3.id },
+    data: { customFields: JSON.stringify({ [cfEnv.id]: "Development" }) },
+  });
+  await db.issue.update({
+    where: { id: i8.id },
+    data: { customFields: JSON.stringify({ [cfGA.id]: daysAhead(60).toISOString() }) },
+  });
 
   // ═══ Comments ═════════════════════════════════════════════════
   await comment(w5, sarah, "Annual pricing numbers are final — see the shared sheet. @Aisha Patel please use the toggle spec from Figma.", 3);

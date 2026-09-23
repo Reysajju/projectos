@@ -129,6 +129,27 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const archived = optBool(body, "archived");
     if (archived !== undefined) data.archivedAt = archived ? new Date() : null;
 
+    // ── Board WIP limits: { statusId: max } — validated against org statuses ──
+    if ("wipLimits" in body) {
+      const raw: unknown = body.wipLimits;
+      if (raw !== null && (typeof raw !== "object" || Array.isArray(raw))) {
+        throw new ApiError("Invalid wipLimits payload", 400);
+      }
+      const incoming = (raw ?? {}) as Record<string, unknown>;
+      const next: Record<string, number> = {};
+      for (const [statusId, limit] of Object.entries(incoming)) {
+        if (limit === null || limit === "" || limit === undefined) continue; // cleared
+        const n = Number(limit);
+        if (!Number.isFinite(n) || n < 1 || n > 99) {
+          throw new ApiError("WIP limit must be between 1 and 99", 400);
+        }
+        const status = await db.status.findFirst({ where: { id: statusId, orgId: session.org.id } });
+        if (!status) throw new ApiError("WIP limit refers to an unknown status", 400);
+        next[statusId] = Math.round(n);
+      }
+      data.wipLimits = Object.keys(next).length ? JSON.stringify(next) : null;
+    }
+
     const updated = await db.project.update({
       where: { id: project.id },
       data,

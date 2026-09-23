@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import type {
   Activity,
   Comment,
+  CustomField,
   IssueType,
   Label,
   Notification,
@@ -28,12 +29,23 @@ export type ProjectDTO = {
   lead: UserDTO | null;
   archived: boolean;
   issueCount: number;
+  /** Board column WIP limits: { statusId: maxCount } */
+  wipLimits: Record<string, number>;
 };
 
 export type TypeDTO = { id: string; name: string; color: string; icon: string; order: number };
 export type StatusDTO = { id: string; name: string; category: "TODO" | "IN_PROGRESS" | "DONE"; color: string; order: number };
 export type PriorityDTO = { id: string; name: string; color: string; order: number };
 export type LabelDTO = { id: string; name: string; color: string };
+
+export type CustomFieldType = "TEXT" | "NUMBER" | "DATE" | "SELECT" | "CHECKBOX";
+export type CustomFieldDTO = {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  options: string[];
+  order: number;
+};
 
 export type SprintDTO = {
   id: string;
@@ -87,6 +99,7 @@ export type IssueDTO = {
   reporter: UserDTO | null;
   labels: LabelDTO[];
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   estimateHours: number | null;
   remainingHours: number | null;
@@ -101,6 +114,8 @@ export type IssueDTO = {
   commentCount: number;
   subtaskCount: number;
   subtasksDone: number;
+  /** Custom field values keyed by fieldId (values are strings). */
+  customFields: Record<string, string>;
 };
 
 // ─── Shared Prisma includes (keeps select-shapes consistent) ────
@@ -155,6 +170,53 @@ export function toLabelDTO(l: Label): LabelDTO {
   return { id: l.id, name: l.name, color: l.color };
 }
 
+export function toCustomFieldDTO(f: CustomField): CustomFieldDTO {
+  let options: string[] = [];
+  if (f.options) {
+    try {
+      const parsed: unknown = JSON.parse(f.options);
+      if (Array.isArray(parsed)) options = parsed.filter((o): o is string => typeof o === "string");
+    } catch {
+      options = [];
+    }
+  }
+  return { id: f.id, name: f.name, type: f.type as CustomFieldDTO["type"], options, order: f.order };
+}
+
+/** Parse a JSON object column safely into a plain string-keyed record. */
+export function parseJsonRecord(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v == null) continue;
+      out[k] = typeof v === "string" ? v : String(v);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Parse the project wipLimits JSON column into { statusId: limit }. */
+export function parseWipLimits(raw: string | null): Record<string, number> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      const n = typeof v === "number" ? v : Number(v);
+      if (Number.isFinite(n) && n > 0) out[k] = Math.round(n);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export function toProjectDTO(p: ProjectWithRelations): ProjectDTO {
   return {
     id: p.id,
@@ -166,6 +228,7 @@ export function toProjectDTO(p: ProjectWithRelations): ProjectDTO {
     lead: p.lead ? toUserDTO(p.lead) : null,
     archived: p.archivedAt != null,
     issueCount: p._count.issues,
+    wipLimits: parseWipLimits(p.wipLimits),
   };
 }
 
@@ -230,6 +293,7 @@ export function toIssueDTO(i: IssueWithRelations): IssueDTO {
     reporter: i.reporter ? toUserDTO(i.reporter) : null,
     labels: i.labels.map((il) => toLabelDTO(il.label)),
     storyPoints: i.storyPoints ?? null,
+    startDate: i.startDate ? i.startDate.toISOString() : null,
     dueDate: i.dueDate ? i.dueDate.toISOString() : null,
     estimateHours: i.estimateHours ?? null,
     remainingHours: i.remainingHours ?? null,
@@ -244,5 +308,6 @@ export function toIssueDTO(i: IssueWithRelations): IssueDTO {
     commentCount: i._count.comments,
     subtaskCount: i._count.subtasks,
     subtasksDone: i.subtasks.filter((st) => st.status.category === "DONE").length,
+    customFields: parseJsonRecord(i.customFields),
   };
 }

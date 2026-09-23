@@ -54,6 +54,7 @@ export function IssuesTableView() {
     () => [...(workspace?.statuses ?? [])].sort((a, b) => a.order - b.order),
     [workspace]
   );
+  const customFields = useMemo(() => workspace?.customFields ?? [], [workspace]);
 
   const sprints = data?.sprints ?? [];
   const sprintName = (id: string | null) => (id ? sprints.find((s) => s.id === id)?.name ?? "—" : "—");
@@ -98,9 +99,28 @@ export function IssuesTableView() {
     }
   }
 
+  function formatCustom(value: string | undefined, type: string): string {
+    if (value == null || value === "") return "";
+    if (type === "DATE") return formatDateShort(value);
+    if (type === "CHECKBOX") return value === "true" ? "Yes" : "No";
+    return value;
+  }
+
   function exportCsv() {
     if (!data) return;
-    const header = ["Key", "Summary", "Type", "Status", "Priority", "Assignee", "Sprint", "Story points", "Due", "Updated"];
+    const header = [
+      "Key",
+      "Summary",
+      "Type",
+      "Status",
+      "Priority",
+      "Assignee",
+      "Sprint",
+      "Story points",
+      "Due",
+      "Updated",
+      ...customFields.map((f) => f.name),
+    ];
     const lines = [header.join(",")];
     for (const i of rows) {
       lines.push(
@@ -115,6 +135,7 @@ export function IssuesTableView() {
           i.storyPoints?.toString() ?? "",
           i.dueDate ? formatDate(i.dueDate) : "",
           formatDate(i.updatedAt),
+          ...customFields.map((f) => formatCustom(i.customFields?.[f.id], f.type)),
         ]
           .map((c) => csvEscape(c))
           .join(",")
@@ -135,18 +156,16 @@ export function IssuesTableView() {
   if (!data) return null;
 
   const SortHeader = ({ k, label }: { k: SortKey; label: string }) => (
-    <TableHead>
-      <button
-        type="button"
-        onClick={() => toggleSort(k)}
-        className="inline-flex items-center gap-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
-        aria-label={`Sort by ${label}`}
-      >
-        {label}
-        {sortKey === k &&
-          (sortAsc ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />)}
-      </button>
-    </TableHead>
+    <button
+      type="button"
+      onClick={() => toggleSort(k)}
+      className="inline-flex items-center gap-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+      aria-label={`Sort by ${label}`}
+    >
+      {label}
+      {sortKey === k &&
+        (sortAsc ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />)}
+    </button>
   );
 
   return (
@@ -178,6 +197,11 @@ export function IssuesTableView() {
                 <TableHead className="w-32">Sprint</TableHead>
                 <TableHead className="w-14 text-right">Pts</TableHead>
                 <TableHead className="w-24"><SortHeader k="due" label="Due" /></TableHead>
+                {customFields.map((f) => (
+                  <TableHead key={f.id} className="w-28 whitespace-nowrap" title={f.name}>
+                    {f.name}
+                  </TableHead>
+                ))}
                 <TableHead className="w-28"><SortHeader k="updated" label="Updated" /></TableHead>
               </TableRow>
             </TableHeader>
@@ -248,6 +272,11 @@ export function IssuesTableView() {
                     {issue.storyPoints ?? "—"}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatDateShort(issue.dueDate)}</TableCell>
+                  {customFields.map((f) => (
+                    <TableCell key={f.id} className="text-xs text-muted-foreground">
+                      {formatCustom(issue.customFields?.[f.id], f.type) || "—"}
+                    </TableCell>
+                  ))}
                   <TableCell>
                     <span className="text-xs text-muted-foreground/80">{formatDateShort(issue.updatedAt)}</span>
                   </TableCell>

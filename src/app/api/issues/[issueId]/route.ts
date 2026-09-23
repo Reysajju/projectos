@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify, transitionIssue } from "@/lib/workflow";
 import { runAutomations } from "@/lib/automation";
-import { issueInclude, toActivityDTO, toCommentDTO, toIssueDTO } from "@/lib/dto";
+import { issueInclude, parseJsonRecord, toActivityDTO, toCommentDTO, toIssueDTO } from "@/lib/dto";
 import {
   ApiError,
   canWrite,
@@ -23,6 +23,23 @@ import {
 } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
+
+function parseOptions(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((o): o is string => typeof o === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function summarizeCustomFields(map: Record<string, string>, defs: { id: string; name: string }[]): string | null {
+  const parts = Object.entries(map)
+    .map(([id, v]) => `${defs.find((d) => d.id === id)?.name ?? id}: ${v}`)
+    .sort();
+  return parts.length ? parts.join(", ") : null;
+}
 
 type Ctx = { params: Promise<{ issueId: string }> };
 
@@ -91,6 +108,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       },
     });
     if (!current || current.orgId !== orgId) return notFound("Issue not found");
+
+    // ── dueDate start-window guard: startDate must stay ≤ dueDate when due moves ──
+    if ("dueDate" in body && current.startDate) {
+      const d = optDateOrNull(body, "dueDate");
+      if (d && d < current.startDate) {
+        throw new ApiError("Due date must be after the start date", 400);
+      }
+    }
 
     const data: Prisma.IssueUncheckedUpdateInput = {};
     const fieldLogs: FieldLog[] = [];
@@ -224,6 +249,20 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         });
       }
     }
+    if ("startDate" in body) {
+      const d = optDateOrNull(body, "startDate");
+      if ((d?.getTime() ?? null) !== (current.startDate?.getTime() ?? null)) {
+        // Roadmap sanity: start may not sit after dueDate.
+        const due = d && current.dueDate && d > current.dueDate ? current.dueDate : null;
+        if (due) throw new ApiError("Start date must be before the due date", 400);
+        data.startDate = d;
+        fieldLogs.push({
+          field: "startDate",
+          oldValue: current.startDate ? current.startDate.toISOString() : null,
+          newValue: d ? d.toISOString() : null,
+        });
+      }
+    }
     if ("dueDate" in body) {
       const d = optDateOrNull(body, "dueDate");
       if ((d?.getTime() ?? null) !== (current.dueDate?.getTime() ?? null)) {
@@ -265,6 +304,47 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       if (v !== current.order) {
         data.order = v;
         fieldLogs.push({ field: "order", oldValue: String(current.order), newValue: String(v) });
+      }
+    }
+
+    // ── Custom fields: replace values map (validated against org field defs) ──
+    if ("customFields" in body) {
+      const raw: unknown = body.customFields;
+      if (raw !== null && (typeof raw !== "object" || Array.isArray(raw))) {
+        throw new ApiError("Invalid customFields payload", 400);
+      }
+      const incoming = (raw ?? {}) as Record<string, unknown>;
+      const defs = await db.customField.findMany({ where: { orgId } });
+      const defById = new Map(defs.map((d) => [d.id, d]));
+      const next: Record<string, string> = {};
+      for (const [fieldId, value] of Object.entries(incoming)) {
+        const def = defById.get(fieldId);
+        if (!def) throw new ApiError(`Unknown custom field: ${fieldId}`, 400);
+        if (value === null || value === undefined || value === "") continue; // cleared values dropped
+        const v = typeof value === "string" ? value : String(value);
+        if (def.type === "NUMBER" && !Number.isFinite(Number(v))) {
+          throw new ApiError(`Custom field “${def.name}” expects a number`, 400);
+        }
+        if (def.type === "DATE" && Number.isNaN(Date.parse(v))) {
+          throw new ApiError(`Custom field “${def.name}” expects a date`, 400);
+        }
+        if (def.type === "SELECT" && !parseOptions(def.options).includes(v)) {
+          throw new ApiError(`Invalid option for custom field “${def.name}”`, 400);
+        }
+        if (def.type === "CHECKBOX") {
+          next[fieldId] = v === "true" ? "true" : "false";
+        } else {
+          next[fieldId] = v.slice(0, 500);
+        }
+      }
+      const currentMap = parseJsonRecord(current.customFields);
+      if (JSON.stringify(currentMap) !== JSON.stringify(next)) {
+        data.customFields = Object.keys(next).length ? JSON.stringify(next) : null;
+        const oldDesc = summarizeCustomFields(currentMap, defs);
+        const newDesc = summarizeCustomFields(next, defs);
+        if (oldDesc !== newDesc) {
+          fieldLogs.push({ field: "customFields", oldValue: oldDesc, newValue: newDesc });
+        }
       }
     }
 

@@ -29,6 +29,8 @@ export interface ProjectDTO {
   lead: UserDTO | null;
   archived: boolean;
   issueCount: number;
+  /** Board column WIP limits: { statusId: maxCount } */
+  wipLimits: Record<string, number>;
 }
 
 export interface TypeDTO {
@@ -60,6 +62,16 @@ export interface LabelDTO {
   id: string;
   name: string;
   color: string;
+}
+
+export type CustomFieldType = "TEXT" | "NUMBER" | "DATE" | "SELECT" | "CHECKBOX";
+
+export interface CustomFieldDTO {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  options: string[];
+  order: number;
 }
 
 export type SprintStatus = "FUTURE" | "ACTIVE" | "COMPLETED";
@@ -121,6 +133,7 @@ export interface IssueDTO {
   reporter: UserDTO | null;
   labels: LabelDTO[];
   storyPoints: number | null;
+  startDate: string | null;
   dueDate: string | null;
   estimateHours: number | null;
   remainingHours: number | null;
@@ -135,6 +148,8 @@ export interface IssueDTO {
   commentCount: number;
   subtaskCount: number;
   subtasksDone: number;
+  /** Custom field values keyed by fieldId (values are strings). */
+  customFields: Record<string, string>;
 }
 
 export interface MemberWithRoleDTO extends UserDTO {
@@ -151,6 +166,7 @@ export interface WorkspacePayload {
   statuses: StatusDTO[];
   priorities: PriorityDTO[];
   labels: LabelDTO[];
+  customFields: CustomFieldDTO[];
 }
 
 export interface MePayload {
@@ -287,11 +303,14 @@ export interface IssuePatchBody {
   assigneeId?: string | null;
   sprintId?: string | null;
   storyPoints?: number | null;
+  startDate?: string | null;
   dueDate?: string | null;
   estimateHours?: number | null;
   remainingHours?: number | null;
   labelIds?: string[];
   order?: number;
+  /** Replace the whole custom-field values map. */
+  customFields?: Record<string, string>;
 }
 
 export interface IssueCreateBody {
@@ -324,6 +343,8 @@ export interface ProjectPatchBody {
   icon?: string;
   leadId?: string | null;
   archived?: boolean;
+  /** Replace the whole board WIP limits map. */
+  wipLimits?: Record<string, number>;
 }
 
 export interface SprintCreateBody {
@@ -399,4 +420,22 @@ export interface AutomationRuleDTO {
 
 export interface AutomationsPayload {
   rules: AutomationRuleDTO[];
+}
+
+// ─── Custom fields ───────────────────────────────────────────
+
+export interface CustomFieldsPayload {
+  fields: CustomFieldDTO[];
+}
+
+export interface CustomFieldCreateBody {
+  name: string;
+  type: CustomFieldType;
+  options?: string[];
+}
+
+export interface CustomFieldPatchBody {
+  name?: string;
+  order?: number;
+  options?: string[];
 }

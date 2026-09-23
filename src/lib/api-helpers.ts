@@ -126,6 +126,11 @@ export function canWrite(role: string): boolean {
   return WRITE_ROLES.includes(role);
 }
 
+/** Configuration-level actions (custom fields, workflow config): ADMIN + MANAGER. */
+export function canManage(role: string): boolean {
+  return role === "ADMIN" || role === "MANAGER";
+}
+
 // ─── Notification fan-out ───────────────────────────────────────
 
 /** Notify every member of the org except the actor. */

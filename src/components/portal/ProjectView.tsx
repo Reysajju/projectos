@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  CalendarRange,
   KanbanSquare,
   ListChecks,
   PieChart,
@@ -21,6 +22,7 @@ import { BoardView } from "./BoardView";
 import { BacklogView } from "./BacklogView";
 import { IssuesTableView } from "./IssuesTableView";
 import { ReportsView } from "./ReportsView";
+import { RoadmapView } from "./RoadmapView";
 import { ProjectDialog } from "./ProjectDialog";
 import { ProjectIcon } from "./IssueTypeIcon";
 import { Avatar } from "./Avatar";
@@ -45,6 +47,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const TABS: { value: ProjectTab; label: string; icon: typeof KanbanSquare }[] = [
   { value: "board", label: "Board", icon: KanbanSquare },
   { value: "backlog", label: "Backlog", icon: ListChecks },
+  { value: "roadmap", label: "Roadmap", icon: CalendarRange },
   { value: "issues", label: "Issues", icon: ListChecks },
   { value: "reports", label: "Reports", icon: PieChart },
   { value: "settings", label: "Settings", icon: Settings2 },
@@ -313,6 +316,9 @@ function ProjectViewInner() {
             </TabsContent>
             <TabsContent value="backlog" className="mt-0">
               <BacklogView />
+            </TabsContent>
+            <TabsContent value="roadmap" className="mt-0">
+              <RoadmapView />
             </TabsContent>
             <TabsContent value="issues" className="mt-0">
               <IssuesTableView />

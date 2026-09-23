@@ -30,6 +30,9 @@ import type {
   SavedFilterDTO,
   AutomationsPayload,
   AutomationRuleDTO,
+  CustomFieldsPayload,
+  CustomFieldDTO,
+  CustomFieldType,
 } from "./portal-types";
 
 export class ApiError extends Error {
@@ -161,6 +164,19 @@ export const api = {
 
   patchMember: (userId: string, body: { role: string }) =>
     apiFetch<MemberWithRoleDTO>(`/api/members/${userId}`, jsonBody(body, "PATCH")),
+
+  // ─── Custom fields ────────────────────────────────────────
+
+  customFields: () => apiFetch<CustomFieldsPayload>("/api/custom-fields"),
+
+  createCustomField: (body: { name: string; type: CustomFieldType; options?: string[] }) =>
+    apiFetch<{ field: CustomFieldDTO }>("/api/custom-fields", jsonBody(body, "POST")),
+
+  patchCustomField: (id: string, body: { name?: string; order?: number; options?: string[] }) =>
+    apiFetch<{ field: CustomFieldDTO }>(`/api/custom-fields/${id}`, jsonBody(body, "PATCH")),
+
+  deleteCustomField: (id: string) =>
+    apiFetch<Record<string, never>>(`/api/custom-fields/${id}`, { method: "DELETE" }),
 };
 
 export type { ActivityDTO };

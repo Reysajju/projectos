@@ -17,13 +17,24 @@ import {
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
-import { usePortalStore } from "@/lib/portal-store";
-import type { IssueDTO, StatusDTO } from "@/lib/portal-types";
+import { usePortalStore, useCanManage } from "@/lib/portal-store";
+import type { IssueDTO, ProjectDTO, StatusDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
 import { IssueCardBody } from "./IssueCard";
 import { FilterBar, matchesFilters, useIssueFilters } from "./issue-filters";
 import { useProjectData } from "./project-data";
-import { Plus } from "lucide-react";
+import { Gauge, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 function DraggableCard({ issue, onOpenIssue }: { issue: IssueDTO; onOpenIssue: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: issue.id });
@@ -62,24 +73,48 @@ function DraggableCard({ issue, onOpenIssue }: { issue: IssueDTO; onOpenIssue: (
 function BoardColumn({
   status,
   issues,
+  limit,
   onOpenIssue,
   onNewIssue,
 }: {
   status: StatusDTO;
   issues: IssueDTO[];
+  limit?: number;
   onOpenIssue: (id: string) => void;
   onNewIssue: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${status.id}` });
+  const atLimit = limit != null && issues.length >= limit;
+  const overLimit = limit != null && issues.length > limit;
   return (
     <section
-      aria-label={`Column ${status.name}`}
-      className="flex w-[280px] shrink-0 flex-col rounded-lg bg-muted/80 ring-1 ring-border sm:w-72"
+      aria-label={`Column ${status.name}${limit != null ? `, WIP limit ${limit}` : ""}`}
+      className={cn(
+        "flex w-[280px] shrink-0 flex-col rounded-lg bg-muted/80 ring-1 ring-border sm:w-72",
+        overLimit && "ring-rose-500/50",
+        isOver && overLimit && "ring-2 ring-rose-500/70"
+      )}
     >
       <header className="flex items-center gap-2 px-3 pb-1 pt-3">
         <span className="size-2.5 rounded-full" style={{ backgroundColor: status.color }} aria-hidden />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{status.name}</h3>
-        <span className="rounded bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">{issues.length}</span>
+        {limit != null ? (
+          <span
+            className={cn(
+              "rounded px-1.5 py-px text-[10px] font-bold tabular-nums ring-1",
+              overLimit
+                ? "animate-pulse bg-rose-500/15 text-rose-600 ring-rose-500/40 dark:text-rose-400"
+                : atLimit
+                  ? "bg-amber-500/15 text-amber-700 ring-amber-500/40 dark:text-amber-400"
+                  : "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-400"
+            )}
+            title={overLimit ? "WIP limit exceeded" : atLimit ? "WIP limit reached" : "Within WIP limit"}
+          >
+            {issues.length}/{limit}
+          </span>
+        ) : (
+          <span className="rounded bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">{issues.length}</span>
+        )}
         <button
           type="button"
           onClick={onNewIssue}
@@ -116,8 +151,10 @@ export function BoardView() {
   const setOpenIssue = usePortalStore((s) => s.setOpenIssue);
   const openCreateIssue = usePortalStore((s) => s.openCreateIssue);
   const activeProjectId = usePortalStore((s) => s.activeProjectId);
+  const canManage = useCanManage();
   const { filters, patch } = useIssueFilters();
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
+  const [wipOpen, setWipOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -199,6 +236,12 @@ export function BoardView() {
     const status = statuses.find((s) => s.id === targetStatusId);
     if (!status) return;
 
+    // WIP limit check (advisory): warn when the move exceeds the column limit.
+    const limit = data.project.wipLimits?.[targetStatusId];
+    const wipExceeded =
+      limit != null && issue.statusId !== targetStatusId &&
+      data.issues.filter((i) => i.statusId === targetStatusId && i.id !== issue.id).length >= limit;
+
     // Optimistic update
     applyIssue({ ...issue, statusId: targetStatusId, status, order: newOrder });
 
@@ -208,7 +251,15 @@ export function BoardView() {
         order: newOrder,
       });
       applyIssue(updated);
-      if (changedStatus) toast.success(`${issue.key} moved to ${status.name}`);
+      if (changedStatus) {
+        if (wipExceeded) {
+          toast.warning(`${status.name} is over its WIP limit (${limit})`, {
+            description: `${issue.key} pushed the column past capacity — consider pulling work through.`,
+          });
+        } else {
+          toast.success(`${issue.key} moved to ${status.name}`);
+        }
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to move issue");
       void refetch();
@@ -224,15 +275,27 @@ export function BoardView() {
           filters={filters}
           patch={patch}
           actions={
-            activeProjectId ? (
-              <button
-                type="button"
-                onClick={() => openCreateIssue({ kind: "project", projectId: activeProjectId })}
-                className="inline-flex h-8 items-center gap-1 rounded-md bg-amber-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
-              >
-                <Plus className="size-3.5" aria-hidden /> New issue
-              </button>
-            ) : null
+            <>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => setWipOpen(true)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                  aria-label="Configure WIP limits"
+                >
+                  <Gauge className="size-3.5" aria-hidden /> WIP limits
+                </button>
+              )}
+              {activeProjectId ? (
+                <button
+                  type="button"
+                  onClick={() => openCreateIssue({ kind: "project", projectId: activeProjectId })}
+                  className="inline-flex h-8 items-center gap-1 rounded-md bg-amber-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                >
+                  <Plus className="size-3.5" aria-hidden /> New issue
+                </button>
+              ) : null}
+            </>
           }
         />
       </div>
@@ -251,6 +314,7 @@ export function BoardView() {
                 key={status.id}
                 status={status}
                 issues={byStatus.get(status.id) ?? []}
+                limit={data.project.wipLimits?.[status.id]}
                 onOpenIssue={setOpenIssue}
                 onNewIssue={() => openCreateIssue({ kind: "project", projectId: data.project.id })}
               />
@@ -265,6 +329,99 @@ export function BoardView() {
           </DragOverlay>
         </DndContext>
       </div>
+
+      <WipLimitsDialog open={wipOpen} onOpenChange={setWipOpen} project={data.project} />
     </div>
+  );
+}
+
+function WipLimitsDialog({
+  open,
+  onOpenChange,
+  project,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  project: ProjectDTO;
+}) {
+  const workspace = usePortalStore((s) => s.workspace);
+  const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
+  const { refetch } = useProjectData();
+  const statuses = useMemo(
+    () => [...(workspace?.statuses ?? [])].sort((a, b) => a.order - b.order),
+    [workspace]
+  );
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  // Seed local state from the project each time the dialog opens.
+  const seededFor = useRef<string | null>(null);
+  if (open && seededFor.current !== project.id) {
+    seededFor.current = project.id;
+    const seed: Record<string, string> = {};
+    for (const [k, v] of Object.entries(project.wipLimits ?? {})) seed[k] = String(v);
+    setValues(seed);
+  }
+  if (!open && seededFor.current !== null) seededFor.current = null;
+
+  async function save() {
+    setBusy(true);
+    try {
+      const wipLimits: Record<string, number> = {};
+      for (const [k, v] of Object.entries(values)) {
+        const n = Number(v);
+        if (v !== "" && Number.isFinite(n) && n > 0) wipLimits[k] = Math.round(n);
+      }
+      await api.patchProject(project.id, { wipLimits });
+      await refreshWorkspace();
+      await refetch();
+      toast.success("WIP limits saved");
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save WIP limits");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Gauge className="size-4 text-amber-600" aria-hidden /> Board WIP limits
+          </DialogTitle>
+          <DialogDescription>
+            Cap how many issues a column may hold. Columns show count/limit and turn amber at the limit, red past it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-72 space-y-2.5 overflow-y-auto pr-1">
+          {statuses.map((s) => (
+            <div key={s.id} className="flex items-center gap-3">
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+              <Label htmlFor={`wip-${s.id}`} className="flex-1 text-sm font-normal">
+                {s.name}
+              </Label>
+              <Input
+                id={`wip-${s.id}`}
+                type="number"
+                min={1}
+                max={99}
+                placeholder="—"
+                className="h-8 w-20 text-right"
+                value={values[s.id] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [s.id]: e.target.value }))}
+              />
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button className="bg-amber-600 hover:bg-amber-700" disabled={busy} onClick={() => void save()}>
+            Save limits
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

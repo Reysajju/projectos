@@ -6,7 +6,7 @@ import { api } from "./api-client";
 import type { NotificationDTO, OrgDTO, UserDTO, WorkspacePayload } from "./portal-types";
 
 export type PortalView = "dashboard" | "projects" | "project" | "team" | "settings" | "search" | "automations";
-export type ProjectTab = "board" | "backlog" | "issues" | "reports" | "settings";
+export type ProjectTab = "board" | "backlog" | "roadmap" | "issues" | "reports" | "settings";
 
 export type CreateIssueContext =
   | { kind: "global" }

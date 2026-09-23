@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Check, Copy, FolderKanban, Settings2, TriangleAlert, Users } from "lucide-react";
+import { Building2, Check, Copy, FolderKanban, ListPlus, Loader2, Pencil, Plus, Settings2, Trash2, TriangleAlert, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
+import type { CustomFieldDTO, CustomFieldType } from "@/lib/portal-types";
 import { Avatar } from "./Avatar";
 import { ProjectDialog } from "./ProjectDialog";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -158,6 +168,9 @@ export function SettingsView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Custom fields */}
+      <CustomFieldsManager canManage={role === "ADMIN" || role === "MANAGER"} fields={workspace.customFields} />
 
       {/* Project settings */}
       <Card>
@@ -293,5 +306,299 @@ export function SettingsView() {
         />
       )}
     </div>
+  );
+}
+
+// ─── Custom fields manager ──────────────────────────────────────
+
+const FIELD_TYPES: { value: CustomFieldType; label: string; hint: string }[] = [
+  { value: "TEXT", label: "Text", hint: "Free-form single line" },
+  { value: "NUMBER", label: "Number", hint: "Numeric value" },
+  { value: "DATE", label: "Date", hint: "Calendar date picker" },
+  { value: "SELECT", label: "Select", hint: "Choose from fixed options" },
+  { value: "CHECKBOX", label: "Checkbox", hint: "Yes / no toggle" },
+];
+
+function CustomFieldsManager({
+  canManage,
+  fields,
+}: {
+  canManage: boolean;
+  fields: CustomFieldDTO[];
+}) {
+  const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  async function createField(body: { name: string; type: CustomFieldType; options: string[] }) {
+    try {
+      await api.createCustomField(body);
+      await refreshWorkspace();
+      toast.success(`Field “${body.name}” created`);
+      setCreateOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create field");
+    }
+  }
+
+  async function renameField(id: string, name: string) {
+    setBusyId(id);
+    try {
+      await api.patchCustomField(id, { name });
+      await refreshWorkspace();
+      toast.success("Field renamed");
+      setEditingId(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to rename field");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteField(id: string) {
+    setBusyId(id);
+    try {
+      await api.deleteCustomField(id);
+      await refreshWorkspace();
+      toast.success("Field deleted — issue values are kept but hidden");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete field");
+    } finally {
+      setBusyId(null);
+      setConfirmDeleteId(null);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ListPlus className="size-4 text-amber-600" aria-hidden /> Custom fields
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Organization-wide issue fields — they appear in the issue panel and the issues table.
+          {canManage ? "" : " Only admins and managers can change them."}
+        </p>
+
+        {fields.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground/80">
+            No custom fields yet.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {fields.map((f) => (
+              <li
+                key={f.id}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 transition-colors hover:bg-muted/40"
+              >
+                {editingId === f.id ? (
+                  <>
+                    <Input
+                      className="h-8 flex-1"
+                      value={editName}
+                      autoFocus
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && editName.trim()) void renameField(f.id, editName.trim());
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      aria-label="Field name"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-8 bg-amber-600 hover:bg-amber-700"
+                      disabled={busyId === f.id || !editName.trim()}
+                      onClick={() => void renameField(f.id, editName.trim())}
+                    >
+                      {busyId === f.id ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Check className="size-3.5" aria-hidden />}
+                      Save
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8" onClick={() => setEditingId(null)}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{f.name}</span>
+                    <span className="rounded bg-muted px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {f.type}
+                    </span>
+                    {f.type === "SELECT" && (
+                      <span className="hidden max-w-40 truncate text-[11px] text-muted-foreground/80 sm:inline">
+                        {f.options.join(" · ")}
+                      </span>
+                    )}
+                    {canManage && (
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          type="button"
+                          aria-label={`Rename ${f.name}`}
+                          className="rounded p-1.5 text-muted-foreground/80 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                          onClick={() => {
+                            setEditingId(f.id);
+                            setEditName(f.name);
+                          }}
+                        >
+                          <Pencil className="size-3.5" aria-hidden />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${f.name}`}
+                          className="rounded p-1.5 text-muted-foreground/80 hover:bg-rose-500/10 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60"
+                          onClick={() => setConfirmDeleteId(f.id)}
+                        >
+                          <Trash2 className="size-3.5" aria-hidden />
+                        </button>
+                      </span>
+                    )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {canManage && (
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-3.5" aria-hidden /> New field
+          </Button>
+        )}
+
+        <CreateFieldDialog open={createOpen} onOpenChange={setCreateOpen} onCreate={createField} />
+
+        <Dialog open={confirmDeleteId != null} onOpenChange={(o) => !o && setConfirmDeleteId(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Delete “{fields.find((f) => f.id === confirmDeleteId)?.name}”?</DialogTitle>
+              <DialogDescription>
+                The field disappears from the issue panel and table. Existing values are kept in storage but no longer shown.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                disabled={busyId != null}
+                onClick={() => confirmDeleteId && void deleteField(confirmDeleteId)}
+              >
+                {busyId === confirmDeleteId ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                Delete field
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CreateFieldDialog({
+  open,
+  onOpenChange,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreate: (body: { name: string; type: CustomFieldType; options: string[] }) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<CustomFieldType>("TEXT");
+  const [optionsRaw, setOptionsRaw] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function reset() {
+    setName("");
+    setType("TEXT");
+    setOptionsRaw("");
+  }
+
+  async function submit() {
+    const options = optionsRaw
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
+    setBusy(true);
+    await onCreate({ name: name.trim(), type, options });
+    setBusy(false);
+    reset();
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        onOpenChange(o);
+        if (!o) reset();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New custom field</DialogTitle>
+          <DialogDescription>Applies to every issue in this organization.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="cf-name">Name</Label>
+            <Input
+              id="cf-name"
+              value={name}
+              autoFocus
+              placeholder="e.g. Environment, Release build"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && name.trim() && !(type === "SELECT" && !optionsRaw.trim())) void submit();
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cf-type">Type</Label>
+            <Select value={type} onValueChange={(v) => setType(v as CustomFieldType)}>
+              <SelectTrigger id="cf-type" aria-label="Field type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FIELD_TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    <span className="flex items-center gap-2">
+                      {t.label}
+                      <span className="text-[11px] text-muted-foreground/80">— {t.hint}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {type === "SELECT" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cf-options">Options</Label>
+              <Input
+                id="cf-options"
+                value={optionsRaw}
+                placeholder="Comma separated — e.g. Production, Staging, Dev"
+                onChange={(e) => setOptionsRaw(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="bg-amber-600 hover:bg-amber-700"
+            disabled={busy || !name.trim() || (type === "SELECT" && !optionsRaw.trim())}
+            onClick={() => void submit()}
+          >
+            {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            Create field
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

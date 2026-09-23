@@ -11,6 +11,7 @@ import {
   toTypeDTO,
   toUserDTO,
   toOrgDTO,
+  toCustomFieldDTO,
 } from "@/lib/dto";
 import { handle, unauthorized } from "@/lib/api-helpers";
 
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     if (!session) return unauthorized();
     const orgId = session.org.id;
 
-    const [members, projects, issueTypes, statuses, priorities, labels] = await Promise.all([
+    const [members, projects, issueTypes, statuses, priorities, labels, customFields] = await Promise.all([
       db.organizationMember.findMany({
         where: { orgId },
         include: { user: true },
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
       db.status.findMany({ where: { orgId }, orderBy: { order: "asc" } }),
       db.priority.findMany({ where: { orgId }, orderBy: { order: "asc" } }),
       db.label.findMany({ where: { orgId }, orderBy: { name: "asc" } }),
+      db.customField.findMany({ where: { orgId }, orderBy: [{ order: "asc" }, { createdAt: "asc" }] }),
     ]);
 
     return NextResponse.json({
@@ -50,6 +52,7 @@ export async function GET(req: NextRequest) {
       statuses: statuses.map(toStatusDTO),
       priorities: priorities.map(toPriorityDTO),
       labels: labels.map(toLabelDTO),
+      customFields: customFields.map(toCustomFieldDTO),
     });
   });
 }

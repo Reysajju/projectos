@@ -260,3 +260,34 @@ Stage Summary:
 - Phase 4 (Configuration/Extensibility) substantially advanced: JQL search + saved filters + automation engine/builder + dark mode now live. Remaining from blueprint: workflow designer (visual), custom fields, roadmap/Gantt, attachments (S3-style), mentions-in-editor, webhook/API-key admin UI, email digests.
 - Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); automation value selects show empty placeholder until clicked; dev-tools overlay can intercept clicks in preview (dev-only).
 - Recommended next: workflow transition designer UI, custom field engine (schema exists in blueprint §9), roadmap timeline, CSV export column config, board WIP limits.
+
+---
+Task ID: 10 (webDevReview round 2 — 2026-09-23 ~10:00 PKT)
+Agent: coordinator (cron review)
+Task: Assess → QA via agent-browser → fix bugs → extend features (roadmap, WIP limits, custom fields)
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy (200), lint clean, login/dashboard/board/search/automations/dark-mode all verified via agent-browser; no console errors; mobile 390=390 no overflow. Phase 4 stable → chose to PROPOSE NEW REQUIREMENTS this round.
+
+BUGS FOUND & FIXED (during build verification)
+- BUG 6: GET /api/workspace → 500 after schema change. Root cause: dev server's globalThis-cached PrismaClient lacked the new `customField` model; `prisma generate` does not invalidate the running Turbopack module cache. FIX in `src/lib/db.ts`: import generated client directly (`.prisma/client/client`, bypasses stale `@prisma/client` barrel) and key the global cache on a model-set signature (Object.values(Prisma.ModelName).sort().join(',')) so future db:push busts it automatically.
+- BUG 7: Settings "New field" dialog silently did nothing (button enabled → click → reset, no network). Root cause: I added custom-field methods to `api2` but SettingsView calls `api.createCustomField` → TypeError swallowed by try/catch → toast.error only. FIX: moved customFields/createCustomField/patchCustomField/deleteCustomField into the main `api` object (api-client.ts). Verified end-to-end via instrumented eval (fetch hooks) → POST now fires, field created, dialog closes.
+- BUG 8: HTML nesting error in IssuesTableView — `SortHeader` rendered a `<TableHead>` INSIDE another `<TableHead>` (`th > th`, React console error). FIX: SortHeader now renders only the sort `<button>`; zero console errors after full view sweep.
+
+FEATURES ADDED (Phase 4 → configuration-engine + planning)
+1. ROADMAP / Gantt view (new project tab, `RoadmapView.tsx` ~700 lines): horizontal day-grid timeline with sticky left labels; sprint bands (ACTIVE amber / COMPLETED emerald / FUTURE stone); epic bars with child-completion progress fill + date range labels; drag bar to move, drag edges to resize (pointer events → day delta → PATCH startDate/dueDate, optimistic); expandable epic rows with child issue mini-bars (+points badges); "Unscheduled" section with quick Schedule popover (two date inputs → PATCH); Month/Quarter zoom (9px vs 3.5px/day), Today button + amber today line; EmptyState when no epics. Schema: added `Issue.startDate`.
+2. BOARD WIP LIMITS: `Project.wipLimits` JSON column `{statusId: limit}`; PATCH /api/projects/[projectId] validates (1–99, org-owned status); column header shows `count/limit` chip — emerald (within), amber at limit, red + pulse + column ring when over; advisory toast.warning on drag-in over limit; "WIP limits" config button (canManage only) with per-status dialog (WipLimitsDialog). Seeded: WEB In Progress=4, In Review=3.
+3. CUSTOM FIELDS ENGINE: `CustomField` model (org-scoped; TEXT/NUMBER/DATE/SELECT/CHECKBOX; SELECT options JSON) + `Issue.customFields` JSON map; API: GET/POST /api/custom-fields, PATCH/DELETE /api/custom-fields/[fieldId] (canManage for writes; name unique, SELECT options validated, delete keeps stored values orphaned); issues PATCH accepts `customFields` (full-map replace; validates field belongs to org, NUMBER/DATE/SELECT types, CHECKBOX true/false) and logs a `customFields` activity row; workspace payload now includes `customFields`. UI: `CustomFieldValue.tsx` typed inline editor; IssuePanel "Custom fields" section (+ Start date picker for roadmap); IssuesTableView columns per field + CSV export columns; SettingsView "Custom fields" manager card (list, create dialog with dynamic options input, inline rename, delete confirm). Seeded: Environment(SELECT), Release build(TEXT), Regression risk(CHECKBOX), GA window(DATE) + values on WEB-9/APP-3/AI-8.
+4. Seed: epic start/due dates (Design System 2.0 Sep 2→Oct 3, Relaunch Sep 16→Oct 25, APP/AI epics), sprint start dates, custom-field demo values, WIP limits.
+
+VERIFICATION
+- API smoke (curl): workspace 200 w/ customFields; projects/[id] returns wipLimits + parsed customFields/startDate; issue PATCH startDate+customFields 200; unknown fieldId 400; bad SELECT option 400; wipLimits 1–99 validation 400; custom-field create/rename/delete 200; activity row for customFields present.
+- Browser (agent-browser): roadmap renders (sprints, epics, children, progress %, today line); DRAG test — dragged WEB-2 bar 13 days left, PATCH committed, restored after; WIP — 4/4 amber chip, config dialog saved To Do=3 (2/3 green), drag into at-limit column → 5/4 red pulse + warning toast; panel — Environment select (Production→Staging persisted), switch, date button render + edit; table — 4 custom columns render; settings — create TEXT + SELECT fields via UI, inline rename (API), delete with confirm; dark mode roadmap clean; mobile 390=390; lint clean; 0 console errors on fresh session.
+
+Stage Summary:
+- Delivered: Roadmap/Gantt tab, board WIP limits, org custom fields engine (schema→API→UI), plus 3 bug fixes (6/7/8). Project tab order: Board | Backlog | Roadmap | Issues | Reports | Settings.
+- Dev-env note: `src/lib/db.ts` now self-heals stale PrismaClient after db:push (no manual restart needed).
+- Remaining from blueprint: workflow transition designer (visual), attachments, webhook/API-key admin UI, email digests, mentions-in-editor, JQL support for custom fields (fields/`cf.name` syntax), dashboard widget customization.
+- Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); agent-browser a11y refs go stale across Radix portal re-renders (use fresh snapshots per step); automation value selects show empty placeholder until clicked.
+- Recommended next: workflow designer UI (§12), attachments on issues, JQL custom-field bindings, board column manager merging WIP + status ordering.
