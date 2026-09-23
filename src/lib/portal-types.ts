@@ -225,6 +225,16 @@ export interface ProjectDetailPayload {
   sprints: SprintDTO[];
   activity: ActivityDTO[];
   stats: ProjectStatsDTO;
+  /** Link edges whose BOTH endpoints are issues of this project (for roadmap arrows). */
+  links: IssueEdgeDTO[];
+}
+
+/** Lightweight link edge — both endpoints are issues in the same project. */
+export interface IssueEdgeDTO {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  type: IssueLinkType;
 }
 
 export interface IssueDetailPayload {
@@ -346,8 +356,8 @@ export interface IssuePatchBody {
   remainingHours?: number | null;
   labelIds?: string[];
   order?: number;
-  /** Replace the whole custom-field values map. */
-  customFields?: Record<string, string>;
+  /** Replace the whole custom-field values map (null clears a field). */
+  customFields?: Record<string, string | null>;
 }
 
 export interface IssueCreateBody {
@@ -580,3 +590,57 @@ export interface ReceiverPing {
 export interface ReceiverPingsPayload {
   pings: ReceiverPing[];
 }
+
+// ─── Email digest (blueprint §34) ───────────────────────────
+
+export type DigestKind = "DAILY" | "WEEKLY";
+
+export interface DigestItemDTO {
+  key: string;
+  summary: string;
+  projectName: string;
+  statusName: string;
+  statusColor: string;
+  priorityName: string | null;
+  dueDate: string | null;
+}
+
+export interface DigestSectionDTO {
+  id: "assigned" | "due-soon" | "overdue" | "blocked" | "completed";
+  title: string;
+  items: DigestItemDTO[];
+}
+
+export interface DigestPreviewPayload {
+  recipient: { name: string; email: string };
+  kind: DigestKind;
+  periodLabel: string;
+  subject: string;
+  sections: DigestSectionDTO[];
+  counts: {
+    assignedOpen: number;
+    dueSoon: number;
+    overdue: number;
+    blocked: number;
+    completed: number;
+    openTotal: number;
+  };
+  text: string;
+}
+
+export interface EmailLogDTO {
+  id: string;
+  kind: string;
+  toEmail: string;
+  toName: string | null;
+  subject: string;
+  status: string;
+  trigger: string | null;
+  createdAt: string;
+}
+
+export interface EmailsPayload {
+  emails: EmailLogDTO[];
+}
+
+export type DigestKindDTO = DigestKind;

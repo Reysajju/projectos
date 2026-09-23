@@ -47,6 +47,9 @@ import type {
   WebhookDeliveryDTO,
   WebhookTestResult,
   ReceiverPingsPayload,
+  DigestKindDTO,
+  DigestPreviewPayload,
+  EmailsPayload,
 } from "./portal-types";
 
 export class ApiError extends Error {
@@ -336,4 +339,16 @@ export const apiKeys = {
 
   revoke: (id: string) =>
     apiFetch<{ ok: boolean }>(`/api/keys/${id}`, { method: "DELETE" }),
+};
+
+// ─── Email digest (blueprint §34) ──────────────────────────────
+
+export const apiDigest = {
+  preview: (kind: DigestKindDTO) =>
+    apiFetch<DigestPreviewPayload>(`/api/digest?kind=${kind}`),
+
+  send: (body: { kind: DigestKindDTO; userIds?: string[]; all?: boolean }) =>
+    apiFetch<{ sent: number; kind: string }>("/api/digest", jsonBody(body, "POST")),
+
+  log: () => apiFetch<EmailsPayload>("/api/emails"),
 };

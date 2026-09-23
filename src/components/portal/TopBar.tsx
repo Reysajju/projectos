@@ -41,6 +41,7 @@ const VIEW_TITLES: Record<string, string> = {
   automations: "Automation",
   webhooks: "Webhooks",
   apikeys: "API Keys",
+  digest: "Email Digest",
   workflow: "Workflow Designer",
   team: "Team",
   settings: "Settings",

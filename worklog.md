@@ -470,3 +470,48 @@ Stage Summary:
 - Remaining blueprint gaps: email digests/transactional email (§34), board column drag-reorder (currently buttons), custom-field inline editing on Issues table, roadmap dependency arrows, sprint auto-planning.
 - Known minor: pre-existing seed.ts/skills tsc quirks (out of app scope); dev-tools overlay can intercept preview clicks (dev-only).
 - Recommended next: email digest preview + weekly cron, board column drag-reorder via dnd-kit, Issues-table custom-field columns.
+---
+Task ID: 15 (round 7)
+Agent: coordinator
+Task: QA assessment (agent-browser) → feature work: Roadmap dependency arrows (§16×§8), Email digest (§34) with scheduled sender, Issues-table inline editing
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy, lint/tsc clean, browser sweep (dashboard/board/roadmap/issues) passed with 0 console errors → phase stable → chose FEATURE WORK on the three largest remaining blueprint gaps.
+
+FEATURE 1 — ROADMAP DEPENDENCY ARROWS (§16 × §8)
+- API: project detail GET now returns `links: IssueEdgeDTO[]` (IssueLink rows where BOTH endpoints are in the project; select id/sourceId/targetId/type).
+- RoadmapView: shared `barGeom()` helper guarantees rendered bars and the SVG layout stay 1:1; `DependencyArrows` overlay draws finish-to-start bezier arrows (source bar right edge → target bar left edge) color-coded by type (BLOCKS amber, CAUSES rose, DUPLICATES violet, RELATES stone) with card-colored halo underlay for legibility over bars, arrowhead markers per type, native <title> tooltip ("WEB-7 causes WEB-11"), hover thickens stroke.
+- Backward (negative-gap) edges render as clean S-curves — visually exposes schedule conflicts (e.g. WEB-9 due Sep 25 blocked by WEB-11 due Sep 26).
+- Toolbar "Links" toggle (aria-pressed, amber active) + "→ Dependency" legend chip; arrows hidden during drag (geometry is committed-data based).
+- Unscheduled-epic rows now fixed-height (ROW_H) with border — consistent row rhythm required for the SVG layout.
+
+FEATURE 2 — ROADMAP "STORIES" SCOPE + StoryRow
+- Root cause discovered while testing arrows: linked issues (WEB-9/11/7…) are STORIES — invisible on the epics-only roadmap, so arrows had no visible endpoints. Added "Stories" scope toggle (default ON) that plots scheduled standalone issues (non-epic, no parent, has startDate/dueDate) after the epics under a sticky "Scheduled issues · N" divider row.
+- StoryRow: type icon + key + summary (done = strikethrough), project-color bar w/ min 2-day width, story-points chip, red overdue dot (due < today, not done); geometry via barGeom(startFallback=dueDate).
+- Arrow endpoints resolve across epic rows, expanded child rows, and story rows; edges to collapsed/unscheduled rows are skipped. Verified: WEB-7→causes→WEB-11, WEB-11→blocks→WEB-9 drawn with correct coordinates; toggles work both ways.
+
+FEATURE 3 — EMAIL DIGEST (§34) FULL STACK
+- Schema: EmailLog (orgId, userId, kind DAILY_DIGEST|WEEKLY_DIGEST, toEmail, subject, body, status SIMULATED|SENT|FAILED, meta JSON) + indexes; db:pushed. Relations added on Organization + User.
+- Engine (src/lib/digest.ts): buildDigest(orgId, userId, kind) — 5 sections (Overdue, Blocked-by-unfinished, Due next 7 days, Open assigned, Completed since period) + counts + subject ("[ProjectOS] Daily digest — 7 due soon · 6 completed"); renderDigestText() plain-text body; sendEmail() outbox writer (sandbox = SIMULATED; swap point for real SMTP).
+- API: GET /api/digest?kind= (preview), POST /api/digest (self-send always; userIds/all require ADMIN+MANAGER), POST /api/digest/cron (x-cron-secret header === DIGEST_CRON_SECRET in .env; iterates ALL orgs × members; notes Mondays for weekly), GET /api/emails (manageOnly, last 50 outbox rows).
+- UI: DigestView + sidebar "Digest" (all roles, Mail icon) + TopBar "Email Digest". Email-client preview (From ProjectOS <digest@projectos.app> / To me / Subject) + mono plain-text body in scrollable card; Daily/Weekly segmented toggle; "Send me a test digest" + manageOnly "Send to everyone"; schedule card with "Next run: tomorrow 09:00 (Asia/Karachi)" chip; manageOnly Outbox table (subject, recipient, kind, trigger, status pill, relative time).
+- Cron mini-service: mini-services/digest-cron (own package.json, `bun --hot index.ts`, port 3210 health endpoint) — fires POST /api/digest/cron daily at 09:00 Asia/Karachi (TZ math w/ UTC+5, self-rescheduling loop, boot catch-up if past 09:00). Started detached; boot catch-up delivered 5 digests (200 ok). Root tsconfig excludes mini-services (Bun globals).
+- Typecheck fix: DigestView role from usePortalStore(s => s.role) (UserDTO has no role).
+
+FEATURE 4 — ISSUES TABLE INLINE EDITING
+- PointsCell: click pts → inline number input (Enter/blur commit, Esc cancel; 0–999 validation; empty clears) → PATCH storyPoints; amber hover affordance.
+- SprintCell: dashed-border Select (Backlog + project sprints) → PATCH sprintId with toast.
+- CustomCell: typed inline editors per custom field — TEXT (input), NUMBER (validated), DATE (native date input → ISO, matches panel format), SELECT (options + None), CHECKBOX (Yes/No pill toggle). API replaces whole customFields map → client-side merge before PATCH; portal-types IssuePatchBody.customFields widened to Record<string, string | null>.
+- VIEWERs get read-only cells (API enforces canWrite anyway). formatCustom moved to module scope. Discoverability tip added next to Export CSV ("click estimate, sprint or custom cells to edit inline").
+
+QA / VERIFICATION
+- API: project detail links[] correct (6 WEB edges); digest preview/send 200; cron endpoint 401 w/o secret, 200 with (5 emails); customFields PATCH 200 + revert 200.
+- Browser (agent-browser): roadmap arrows drawn w/ correct endpoints + conflict S-curves; Links/Stories toggles verified; digest preview daily/weekly switch, test send → toast + outbox row (6 recorded); sprint select WEB-1 → Sprint 2 → Backlog; pts 13 → cleared; Environment=Staging, GA window=Oct 15, Release build=v2.4.1 all committed then reverted via API; dark mode clean on roadmap (arrows legible over bars), digest, table; mobile 390px = 0 horizontal overflow (digest single column, hamburger nav); 0 runtime console errors (only Fast Refresh warnings from my edits); lint + tsc clean.
+- Dev-env: dev server died again after db:push Prisma regen (known); restarted detached, stable since. Test-data contamination root-caused to an open IssuePanel sheet intercepting focus — not an app bug.
+
+Stage Summary:
+- Round 7 shipped: §16×§8 roadmap dependency arrows (+ Stories scope), §34 email digest end-to-end (engine → outbox → UI → real scheduled mini-service), and Issues-table inline editing (pts/sprint/custom fields). Sidebar now: Dashboard, Projects, Search, Automation, Digest, Webhooks (manageOnly), API Keys (manageOnly), Workflow (manageOnly), Team, Settings.
+- Remaining blueprint gaps: board column drag-reorder (buttons exist), mentions→email notifications linking, sprint auto-planning, dashboard widget drag (up/down buttons exist).
+- Known minor: Escape inside Select-in-Dialog closes both (shadcn default); Release-build test artifact was overlay focus, no fix needed; digest outbox grows unbounded (50 shown — consider pruning like webhook deliveries).
+- Recommended next: board column drag-reorder via dnd-kit, sprint auto-planning suggestions, outbox pruning + "Email me a preview" for weekly cadence, roadmap arrow hover → highlight both issue rows.

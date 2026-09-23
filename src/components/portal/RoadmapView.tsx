@@ -26,6 +26,8 @@ import {
   ChevronRight,
   Flag,
   Inbox,
+  Layers,
+  Link2,
   Loader2,
   Target,
   Zap,
@@ -34,7 +36,7 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
-import type { IssueDTO, SprintDTO } from "@/lib/portal-types";
+import type { IssueDTO, IssueEdgeDTO, IssueLinkType, SprintDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +53,42 @@ type DragMode = "move" | "resize-l" | "resize-r";
 const LABEL_W = 232;
 const DAY_W: Record<Zoom, number> = { month: 9, quarter: 3.5 };
 const ROW_H = 40;
+const CHILD_H = 32;
+const STORY_DIVIDER_H = 28;
+
+/** Bar geometry shared by the rendered rows and the arrow layout (must stay in sync). */
+function barGeom(
+  issue: IssueDTO,
+  min: Date,
+  dayW: number,
+  startFallback?: Date
+): { left: number; width: number } {
+  const start = issue.startDate ? toDay(issue.startDate) : startFallback ?? toDay(issue.createdAt);
+  const end = issue.dueDate ? toDay(issue.dueDate) : start;
+  const left = Math.max(differenceInCalendarDays(start, min), 0) * dayW;
+  const width = Math.max((differenceInCalendarDays(end, start) + 1) * dayW, dayW * 2);
+  return { left, width };
+}
+
+/** Dependency arrow styling per link type (blueprint §16 × §8). */
+const EDGE_COLORS: Record<IssueLinkType, string> = {
+  BLOCKS: "#f59e0b",
+  CAUSES: "#f43f5e",
+  DUPLICATES: "#8b5cf6",
+  RELATES: "#a8a29e",
+};
+
+interface RowGeom {
+  top: number;
+  height: number;
+  left: number;
+  width: number;
+  hasBar: boolean;
+}
+interface RowLayout {
+  byId: Map<string, RowGeom>;
+  totalHeight: number;
+}
 
 interface DragState {
   issueId: string;
@@ -85,6 +123,8 @@ export function RoadmapView() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [drag, setDrag] = useState<DragState | null>(null);
   const [overrides, setOverrides] = useState<Map<string, ScheduleOverride>>(new Map());
+  const [showLinks, setShowLinks] = useState(true);
+  const [showStories, setShowStories] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
 
@@ -133,6 +173,23 @@ export function RoadmapView() {
     [data]
   );
 
+  const epicIds = useMemo(() => new Set(epics.map(({ epic }) => epic.id)), [epics]);
+
+  /**
+   * Scheduled standalone stories — non-epic, non-child issues with explicit dates.
+   * Rendered after the epic rows when "Stories" scope is on; powers dependency arrows.
+   */
+  const stories = useMemo(() => {
+    if (!data) return [];
+    return data.issues
+      .filter((i) => !epicIds.has(i.id) && !i.parentId && (i.startDate || i.dueDate))
+      .sort((a, b) => {
+        const aT = new Date(a.startDate ?? a.dueDate ?? a.createdAt).getTime();
+        const bT = new Date(b.startDate ?? b.dueDate ?? b.createdAt).getTime();
+        return aT - bT || a.key.localeCompare(b.key, undefined, { numeric: true });
+      });
+  }, [data, epicIds]);
+
   // ── Timeline window ────────────────────────────────────────────
   const window_ = useMemo(() => {
     if (!data) return null;
@@ -147,6 +204,10 @@ export function RoadmapView() {
       if (end) stamps.push(end);
       for (const c of e.children) if (c.dueDate) stamps.push(toDay(c.dueDate));
     }
+    for (const st of stories) {
+      if (st.startDate) stamps.push(toDay(st.startDate));
+      if (st.dueDate) stamps.push(toDay(st.dueDate));
+    }
     const today = toDay(new Date());
     let min = stamps.length ? new Date(Math.min(...stamps.map((d) => d.getTime()))) : addDays(today, -14);
     let max = stamps.length ? new Date(Math.max(...stamps.map((d) => d.getTime()))) : addDays(today, 60);
@@ -156,7 +217,7 @@ export function RoadmapView() {
     if (max < addDays(today, 1)) max = endOfMonth(addDays(today, 45));
     if (differenceInCalendarDays(max, min) < 80) max = addDays(min, 100);
     return { min, max, totalDays: differenceInCalendarDays(max, min) + 1, today };
-  }, [data, epics, scheduleOf]);
+  }, [data, epics, scheduleOf, stories]);
 
   const timelineW = (window_?.totalDays ?? 1) * dayW;
 
@@ -180,6 +241,45 @@ export function RoadmapView() {
   }, [window_, dayW, zoom]);
 
   const todayLeft = window_ ? differenceInCalendarDays(window_.today, window_.min) * dayW + dayW / 2 : 0;
+
+  // ── Row layout (mirrors the rendered rows 1:1, powers dependency arrows) ──
+  const layout = useMemo<RowLayout>(() => {
+    const byId = new Map<string, RowGeom>();
+    let top = 0;
+    if (data && window_) {
+      for (const { epic, children } of epics) {
+        const base = scheduleOf(epic);
+        if (!base.start) {
+          // Unscheduled rows render as a fixed-height label-only row.
+          byId.set(epic.id, { top, height: ROW_H, left: 0, width: 0, hasBar: false });
+          top += ROW_H;
+          continue;
+        }
+        const s = base.start;
+        const e2 = base.end ?? addDays(s, 13);
+        const left = Math.max(differenceInCalendarDays(s, window_.min), 0) * dayW;
+        const width = Math.max((differenceInCalendarDays(e2, s) + 1) * dayW, dayW * 5);
+        byId.set(epic.id, { top, height: ROW_H, left, width, hasBar: true });
+        top += ROW_H;
+        if (!collapsed.has(epic.id)) {
+          for (const child of children) {
+            const geom = barGeom(child, window_.min, dayW);
+            byId.set(child.id, { top, height: CHILD_H, left: geom.left, width: geom.width, hasBar: true });
+            top += CHILD_H;
+          }
+        }
+      }
+      if (showStories && stories.length > 0) {
+        top += STORY_DIVIDER_H; // section divider row
+        for (const st of stories) {
+          const geom = barGeom(st, window_.min, dayW);
+          byId.set(st.id, { top, height: CHILD_H, left: geom.left, width: geom.width, hasBar: true });
+          top += CHILD_H;
+        }
+      }
+    }
+    return { byId, totalHeight: top };
+  }, [data, window_, epics, scheduleOf, collapsed, dayW, showStories, stories]);
 
   // ── Drag handling ──────────────────────────────────────────────
   function onBarPointerDown(e: React.PointerEvent, epic: IssueDTO, mode: DragMode) {
@@ -287,6 +387,34 @@ export function RoadmapView() {
         <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={scrollToToday}>
           <Target className="size-3.5" aria-hidden /> Today
         </Button>
+        <button
+          type="button"
+          onClick={() => setShowLinks((v) => !v)}
+          aria-pressed={showLinks}
+          title={showLinks ? "Hide dependency arrows" : "Show dependency arrows"}
+          className={cn(
+            "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+            showLinks
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              : "border-border bg-card text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Link2 className="size-3.5" aria-hidden /> Links
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowStories((v) => !v)}
+          aria-pressed={showStories}
+          title={showStories ? "Show epics only" : "Also plot scheduled issues (stories with dates)"}
+          className={cn(
+            "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+            showStories
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              : "border-border bg-card text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Layers className="size-3.5" aria-hidden /> Stories
+        </button>
         <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="inline-block size-2.5 rounded-sm" style={{ backgroundColor: hexAlpha(data.project.color, "cc") }} aria-hidden />
@@ -297,6 +425,13 @@ export function RoadmapView() {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block size-2.5 rounded-full bg-amber-500" aria-hidden /> Active sprint
+          </span>
+          <span className="hidden items-center gap-1.5 lg:flex">
+            <svg width="15" height="8" viewBox="0 0 15 8" aria-hidden>
+              <line x1="0" y1="4" x2="10" y2="4" stroke="#f59e0b" strokeWidth="1.75" />
+              <path d="M 10 1 L 14.5 4 L 10 7 z" fill="#f59e0b" />
+            </svg>
+            Dependency
           </span>
           <span className="hidden items-center gap-1.5 md:flex">Drag bars to reschedule</span>
         </div>
@@ -363,6 +498,17 @@ export function RoadmapView() {
 
             {/* ── Epic + child rows ── */}
             <div className="relative">
+              {/* dependency arrows overlay (hidden while dragging — geometry is committed-data based) */}
+              {showLinks && !drag && data.links.length > 0 && layout.totalHeight > 0 && (
+                <DependencyArrows
+                  edges={data.links}
+                  layout={layout}
+                  labelW={LABEL_W}
+                  timelineW={timelineW}
+                  issues={data.issues}
+                />
+              )}
+
               {/* today line spanning all rows */}
               <div
                 className="pointer-events-none absolute bottom-0 top-0 z-10 w-px"
@@ -388,15 +534,16 @@ export function RoadmapView() {
 
                 if (!base.start && !dragState) {
                   return (
-                    <EpicRowLabel
-                      key={epic.id}
-                      epic={epic}
-                      progress={progress}
-                      childrenCount={children.length}
-                      open={children.length > 0 && !isCollapsed}
-                      onToggle={() => toggleCollapsed(epic.id)}
-                      onOpen={() => setOpenIssue(epic.id)}
-                    />
+                    <div key={epic.id} className="relative flex items-center border-b border-border/40" style={{ height: ROW_H }}>
+                      <EpicRowLabel
+                        epic={epic}
+                        progress={progress}
+                        childrenCount={children.length}
+                        open={children.length > 0 && !isCollapsed}
+                        onToggle={() => toggleCollapsed(epic.id)}
+                        onOpen={() => setOpenIssue(epic.id)}
+                      />
+                    </div>
                   );
                 }
 
@@ -481,6 +628,34 @@ export function RoadmapView() {
                   </div>
                 );
               })}
+
+              {/* ── Scheduled standalone stories (scope toggle) ── */}
+              {showStories && stories.length > 0 && (
+                <>
+                  <div className="flex items-center border-t border-border bg-muted/40" style={{ height: STORY_DIVIDER_H }}>
+                    <div
+                      className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                      style={{ width: LABEL_W, height: STORY_DIVIDER_H }}
+                    >
+                      <Layers className="size-3 text-amber-500" aria-hidden /> Scheduled issues
+                      <span className="ml-auto rounded bg-muted px-1 text-[9px] font-bold tabular-nums text-muted-foreground">{stories.length}</span>
+                    </div>
+                    <div className="flex-1" />
+                  </div>
+                  {stories.map((st) => (
+                    <StoryRow
+                      key={st.id}
+                      issue={st}
+                      min={window_.min}
+                      dayW={dayW}
+                      labelW={LABEL_W}
+                      timelineW={timelineW}
+                      projectColor={data.project.color}
+                      onOpen={() => setOpenIssue(st.id)}
+                    />
+                  ))}
+                </>
+              )}
             </div>
 
             {/* ── Unscheduled epics ── */}
@@ -514,6 +689,94 @@ export function RoadmapView() {
 }
 
 // ─── Sub-components ─────────────────────────────────────────────
+
+/**
+ * DependencyArrows — SVG overlay drawing link edges (§16) between roadmap bars.
+ * Arrow: source bar right edge → target bar left edge (finish-to-start).
+ * Color-coded by link type, with a card-colored halo for legibility over bars.
+ */
+function DependencyArrows({
+  edges,
+  layout,
+  labelW,
+  timelineW,
+  issues,
+}: {
+  edges: IssueEdgeDTO[];
+  layout: RowLayout;
+  labelW: number;
+  timelineW: number;
+  issues: IssueDTO[];
+}) {
+  const byKey = useMemo(() => new Map(issues.map((i) => [i.id, i])), [issues]);
+  const maxX = labelW + timelineW - 2;
+
+  const paths = edges
+    .map((edge) => {
+      const from = layout.byId.get(edge.sourceId);
+      const to = layout.byId.get(edge.targetId);
+      if (!from || !to || !from.hasBar || !to.hasBar) return null;
+      const src = byKey.get(edge.sourceId);
+      const tgt = byKey.get(edge.targetId);
+      if (!src || !tgt) return null;
+
+      const x1 = Math.min(labelW + from.left + from.width, maxX);
+      const y1 = from.top + from.height / 2;
+      const x2 = Math.max(Math.min(labelW + to.left, maxX), labelW + 2);
+      const y2 = to.top + to.height / 2;
+      const gap = x2 - x1;
+      // Control-point spread: wide gaps curve gently, overlaps still get a clean S.
+      const k = Math.min(Math.max(Math.abs(gap) / 2, 26), 64);
+      const d = `M ${x1} ${y1} C ${x1 + k} ${y1}, ${x2 - k} ${y2}, ${x2} ${y2}`;
+      return { edge, d, color: EDGE_COLORS[edge.type], label: `${src.key} ${edge.type.toLowerCase()} ${tgt.key}` };
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null);
+
+  if (paths.length === 0) return null;
+
+  return (
+    <svg
+      className="pointer-events-none absolute left-0 top-0 z-[6]"
+      width={labelW + timelineW}
+      height={layout.totalHeight}
+      aria-hidden
+    >
+      <defs>
+        {Object.entries(EDGE_COLORS).map(([type, color]) => (
+          <marker
+            key={type}
+            id={`edge-arrow-${type}`}
+            viewBox="0 0 10 10"
+            refX="8.5"
+            refY="5"
+            markerWidth="5.5"
+            markerHeight="5.5"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 1 L 9 5 L 0 9 z" fill={color} />
+          </marker>
+        ))}
+      </defs>
+      {paths.map(({ edge, d, color, label }) => (
+        <g key={edge.id} className="pointer-events-auto group/edge">
+          <title>{label}</title>
+          {/* halo for legibility over bars */}
+          <path d={d} fill="none" strokeWidth={4.5} className="stroke-card" strokeLinecap="round" />
+          <path
+            d={d}
+            fill="none"
+            strokeWidth={1.75}
+            stroke={color}
+            strokeLinecap="round"
+            markerEnd={`url(#edge-arrow-${edge.type})`}
+            className="transition-[stroke-width] duration-150 group-hover/edge:stroke-[3]"
+            opacity={0.9}
+          />
+        </g>
+      ))}
+    </svg>
+  );
+}
 
 function EpicRowLabel({
   epic,
@@ -566,6 +829,84 @@ function EpicRowLabel({
           {Math.round(progress * 100)}%
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * StoryRow — a scheduled standalone issue (non-epic, top-level) plotted on the
+ * roadmap when the "Stories" scope toggle is on. Bar uses the project color.
+ */
+function StoryRow({
+  issue,
+  min,
+  dayW,
+  labelW,
+  timelineW,
+  projectColor,
+  onOpen,
+}: {
+  issue: IssueDTO;
+  min: Date;
+  dayW: number;
+  labelW: number;
+  timelineW: number;
+  projectColor: string;
+  onOpen: () => void;
+}) {
+  const done = issue.status.category === "DONE";
+  const overdue = !done && issue.dueDate != null && toDay(issue.dueDate) < startOfDay(new Date());
+  const geom = barGeom(issue, min, dayW, issue.dueDate ? toDay(issue.dueDate) : undefined);
+
+  return (
+    <div className="relative flex border-b border-border/30" style={{ height: CHILD_H }}>
+      <div
+        className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-2.5"
+        style={{ width: labelW }}
+      >
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+          aria-label={`Open issue ${issue.key}`}
+        >
+          <IssueTypeIcon type={issue.type} size={11} />
+          <KeyBadge>{issue.key}</KeyBadge>
+          <span className={cn("min-w-0 flex-1 truncate text-[11px]", done ? "text-muted-foreground/70 line-through" : "text-foreground/90")}>
+            {issue.summary}
+          </span>
+        </button>
+      </div>
+      <div className="relative" style={{ width: timelineW }}>
+        <button
+          type="button"
+          onClick={onOpen}
+          className={cn(
+            "absolute top-1/2 h-3.5 -translate-y-1/2 rounded-full border transition-shadow hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+            done && "opacity-55"
+          )}
+          style={{
+            left: geom.left,
+            width: geom.width,
+            backgroundColor: hexAlpha(projectColor, "59"),
+            borderColor: hexAlpha(projectColor, "99"),
+          }}
+          aria-label={`${issue.key} ${issue.summary} roadmap bar`}
+        >
+          {overdue && (
+            <span
+              className="absolute -right-1 -top-1 size-2 rounded-full border border-card bg-rose-500"
+              title="Overdue"
+              aria-label="Overdue"
+            />
+          )}
+          {issue.storyPoints != null && (
+            <span className="absolute -right-1 -top-3 rounded bg-muted px-1 text-[8px] font-semibold text-muted-foreground">
+              {issue.storyPoints}pt
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 }

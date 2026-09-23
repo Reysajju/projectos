@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Download, Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
-import type { IssueDTO, StatusDTO } from "@/lib/portal-types";
+import type { CustomFieldDTO, IssueDTO, StatusDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./Avatar";
 import { EmptyState } from "./EmptyState";
@@ -40,15 +40,25 @@ function csvEscape(v: string): string {
   return v;
 }
 
+function formatCustom(value: string | undefined, type: string): string {
+  if (value == null || value === "") return "";
+  if (type === "DATE") return formatDateShort(value);
+  if (type === "CHECKBOX") return value === "true" ? "Yes" : "No";
+  return value;
+}
+
 export function IssuesTableView() {
   const { data, applyIssue, refetch } = useProjectData();
   const workspace = usePortalStore((s) => s.workspace);
   const me = usePortalStore((s) => s.me);
+  const role = usePortalStore((s) => s.role);
   const setOpenIssue = usePortalStore((s) => s.setOpenIssue);
   const { filters, patch } = useIssueFilters();
   const [sortKey, setSortKey] = useState<SortKey>("key");
   const [sortAsc, setSortAsc] = useState(true);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
+  // Inline editing is available to every role except VIEWER (API enforces too).
+  const editable = role !== "VIEWER";
 
   const statuses = useMemo(
     () => [...(workspace?.statuses ?? [])].sort((a, b) => a.order - b.order),
@@ -97,13 +107,6 @@ export function IssuesTableView() {
     } finally {
       setRowBusy(null);
     }
-  }
-
-  function formatCustom(value: string | undefined, type: string): string {
-    if (value == null || value === "") return "";
-    if (type === "DATE") return formatDateShort(value);
-    if (type === "CHECKBOX") return value === "true" ? "Yes" : "No";
-    return value;
   }
 
   function exportCsv() {
@@ -172,9 +175,17 @@ export function IssuesTableView() {
     <div className="space-y-4 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <FilterBar filters={filters} patch={patch} />
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv} disabled={rows.length === 0}>
-          <Download className="size-3.5" aria-hidden /> Export CSV
-        </Button>
+        <div className="flex items-center gap-3">
+          {editable && (
+            <span className="hidden text-[11px] text-muted-foreground/70 lg:inline">
+              Tip: click <span className="font-medium text-muted-foreground">estimate</span>,{" "}
+              <span className="font-medium text-muted-foreground">sprint</span> or custom cells to edit inline
+            </span>
+          )}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv} disabled={rows.length === 0}>
+            <Download className="size-3.5" aria-hidden /> Export CSV
+          </Button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -265,16 +276,16 @@ export function IssuesTableView() {
                       <span className="text-xs text-muted-foreground/80">Unassigned</span>
                     )}
                   </TableCell>
-                  <TableCell>
-                    <span className="truncate text-xs text-muted-foreground">{sprintName(issue.sprintId)}</span>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <SprintCell issue={issue} sprints={sprints} editable={editable} onSaved={applyIssue} />
                   </TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground">
-                    {issue.storyPoints ?? "—"}
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <PointsCell issue={issue} editable={editable} onSaved={applyIssue} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatDateShort(issue.dueDate)}</TableCell>
                   {customFields.map((f) => (
-                    <TableCell key={f.id} className="text-xs text-muted-foreground">
-                      {formatCustom(issue.customFields?.[f.id], f.type) || "—"}
+                    <TableCell key={f.id} className="text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                      <CustomCell issue={issue} field={f} editable={editable} onSaved={applyIssue} />
                     </TableCell>
                   ))}
                   <TableCell>
@@ -288,4 +299,289 @@ export function IssuesTableView() {
       )}
     </div>
   );
+}
+
+// ─── Inline-editable cells ──────────────────────────────────────
+
+/** Compact inline text/number/date input used by editable cells. */
+function CellInput({
+  type = "text",
+  initial,
+  widthClass,
+  ariaLabel,
+  onCommit,
+  onClose,
+}: {
+  type?: "text" | "number" | "date";
+  initial: string;
+  widthClass?: string;
+  ariaLabel: string;
+  onCommit: (value: string | null) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    if (type !== "date") ref.current?.select();
+  }, [type]);
+
+  return (
+    <input
+      ref={ref}
+      type={type}
+      defaultValue={initial}
+      aria-label={ariaLabel}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+      onBlur={(e) => {
+        const v = e.target.value.trim();
+        if (v !== initial) onCommit(v === "" ? null : v);
+        else onClose();
+      }}
+      className={cn(
+        "h-7 rounded-md border border-amber-500/60 bg-background px-2 text-xs tabular-nums text-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40",
+        widthClass
+      )}
+    />
+  );
+}
+
+function PointsCell({
+  issue,
+  editable,
+  onSaved,
+}: {
+  issue: IssueDTO;
+  editable: boolean;
+  onSaved: (i: IssueDTO) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  async function commit(raw: string | null) {
+    setEditing(false);
+    const n = raw === null || raw === "" ? null : Number(raw);
+    if (n !== null && (!Number.isFinite(n) || n < 0 || n > 999)) {
+      toast.error("Story points must be a number between 0 and 999");
+      return;
+    }
+    try {
+      const updated = await api.patchIssue(issue.id, { storyPoints: n });
+      onSaved(updated);
+      toast.success(n === null ? `${issue.key} estimate cleared` : `${issue.key} → ${n} pts`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update estimate");
+    }
+  }
+
+  if (!editable) {
+    return <span className="text-xs text-muted-foreground">{issue.storyPoints ?? "—"}</span>;
+  }
+  if (editing) {
+    return (
+      <CellInput
+        type="number"
+        initial={issue.storyPoints?.toString() ?? ""}
+        widthClass="w-16 text-right"
+        ariaLabel={`Story points of ${issue.key}`}
+        onCommit={(v) => void commit(v)}
+        onClose={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      title="Edit story points"
+      aria-label={`Edit story points of ${issue.key}`}
+      className={cn(
+        "min-w-8 rounded px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+        issue.storyPoints != null && "font-medium text-foreground"
+      )}
+    >
+      {issue.storyPoints ?? "—"}
+    </button>
+  );
+}
+
+function SprintCell({
+  issue,
+  sprints,
+  editable,
+  onSaved,
+}: {
+  issue: IssueDTO;
+  sprints: { id: string; name: string; status: string }[];
+  editable: boolean;
+  onSaved: (i: IssueDTO) => void;
+}) {
+  if (!editable || sprints.length === 0) {
+    const name = sprints.find((s) => s.id === issue.sprintId)?.name;
+    return <span className="truncate text-xs text-muted-foreground">{name ?? "—"}</span>;
+  }
+
+  async function change(sprintId: string | null) {
+    if ((issue.sprintId ?? null) === sprintId) return;
+    try {
+      const updated = await api.patchIssue(issue.id, { sprintId });
+      onSaved(updated);
+      toast.success(
+        sprintId === null
+          ? `${issue.key} moved to backlog`
+          : `${issue.key} moved to ${sprints.find((s) => s.id === sprintId)?.name ?? "sprint"}`
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change sprint");
+    }
+  }
+
+  return (
+    <Select value={issue.sprintId ?? "__backlog"} onValueChange={(v) => void change(v === "__backlog" ? null : v)}>
+      <SelectTrigger
+        size="sm"
+        className="h-7 w-[120px] border-dashed bg-card text-xs text-muted-foreground"
+        aria-label={`Sprint of ${issue.key}`}
+      >
+        <span className="truncate">
+          {issue.sprintId ? sprints.find((s) => s.id === issue.sprintId)?.name ?? "—" : "Backlog"}
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__backlog">
+          <span className="text-muted-foreground/80">Backlog</span>
+        </SelectItem>
+        {sprints.map((s) => (
+          <SelectItem key={s.id} value={s.id}>
+            {s.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function CustomCell({
+  issue,
+  field,
+  editable,
+  onSaved,
+}: {
+  issue: IssueDTO;
+  field: CustomFieldDTO;
+  editable: boolean;
+  onSaved: (i: IssueDTO) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const raw = issue.customFields?.[field.id] ?? null;
+
+  async function save(value: string | null) {
+    setEditing(false);
+    try {
+      // The API replaces the whole values map — merge client-side.
+      const merged = { ...(issue.customFields ?? {}), [field.id]: value } as Record<string, string>;
+      const updated = await api.patchIssue(issue.id, { customFields: merged });
+      onSaved(updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update field");
+    }
+  }
+
+  const staticView = formatCustom(raw, field.type) || <span className="text-muted-foreground/60">—</span>;
+
+  if (!editable) return <span className="text-xs text-muted-foreground">{staticView}</span>;
+
+  switch (field.type) {
+    case "CHECKBOX":
+      return (
+        <button
+          type="button"
+          onClick={() => void save(raw === "true" ? "false" : "true")}
+          aria-label={`Toggle ${field.name} of ${issue.key}`}
+          aria-pressed={raw === "true"}
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+            raw === "true"
+              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+              : "bg-muted text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {raw === "true" ? "Yes" : "No"}
+        </button>
+      );
+    case "SELECT":
+      return (
+        <Select value={raw ?? "__none"} onValueChange={(v) => void save(v === "__none" ? null : v)}>
+          <SelectTrigger
+            size="sm"
+            className="h-7 w-[104px] border-dashed bg-card text-xs"
+            aria-label={`${field.name} of ${issue.key}`}
+          >
+            <span className={cn("truncate", !raw && "text-muted-foreground/60")}>{raw ?? "—"}</span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none">
+              <span className="text-muted-foreground/80">None</span>
+            </SelectItem>
+            {field.options.map((o) => (
+              <SelectItem key={o} value={o}>
+                {o}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    case "NUMBER":
+    case "DATE":
+    case "TEXT":
+    default: {
+      if (editing) {
+        const initial =
+          field.type === "DATE" && raw ? raw.slice(0, 10) : raw ?? "";
+        return (
+          <CellInput
+            type={field.type === "NUMBER" ? "number" : field.type === "DATE" ? "date" : "text"}
+            initial={initial}
+            widthClass={field.type === "DATE" ? "w-32" : "w-24"}
+            ariaLabel={`${field.name} of ${issue.key}`}
+            onCommit={(v) => {
+              if (field.type === "NUMBER" && v !== null && v !== "") {
+                if (!Number.isFinite(Number(v))) {
+                  toast.error(`${field.name} expects a number`);
+                  return;
+                }
+                void save(String(Number(v)));
+              } else if (field.type === "DATE" && v) {
+                const d = new Date(`${v}T12:00:00`);
+                if (Number.isNaN(d.getTime())) {
+                  toast.error(`${field.name} expects a date`);
+                  return;
+                }
+                void save(d.toISOString());
+              } else {
+                void save(v);
+              }
+            }}
+            onClose={() => setEditing(false)}
+          />
+        );
+      }
+      return (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          title={`Edit ${field.name}`}
+          aria-label={`Edit ${field.name} of ${issue.key}`}
+          className="max-w-28 truncate rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        >
+          {staticView}
+        </button>
+      );
+    }
+  }
 }

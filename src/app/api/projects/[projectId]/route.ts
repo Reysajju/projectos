@@ -39,7 +39,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const project = await getOwnedProject(session.org.id, projectId);
     if (!project) return notFound("Project not found");
 
-    const [issues, sprints, activity] = await Promise.all([
+    const [issues, sprints, activity, links] = await Promise.all([
       db.issue.findMany({
         where: { projectId },
         include: issueInclude,
@@ -54,6 +54,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         include: { user: true },
         orderBy: { createdAt: "desc" },
         take: 20,
+      }),
+      // Link edges with BOTH endpoints inside this project (roadmap dependency arrows).
+      db.issueLink.findMany({
+        where: { source: { projectId }, target: { projectId } },
+        select: { id: true, sourceId: true, targetId: true, type: true },
       }),
     ]);
 
@@ -79,6 +84,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       sprints: sprints.map(toSprintDTO),
       activity: activity.map(toActivityDTO),
       stats,
+      links: links.map((l) => ({ id: l.id, sourceId: l.sourceId, targetId: l.targetId, type: l.type })),
     });
   });
 }

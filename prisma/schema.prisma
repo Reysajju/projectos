@@ -37,6 +37,7 @@ model User {
   issueLinksCreated IssueLink[]     @relation("IssueLinkCreator")
   apiKeysCreated ApiKey[]           @relation("ApiKeyCreator")
   preferences   UserPreference[]
+  emails        EmailLog[]
 }
 
 model Session {
@@ -73,6 +74,7 @@ model Organization {
   webhooks     Webhook[]
   issueLinks   IssueLink[]
   apiKeys      ApiKey[]
+  emails       EmailLog[]
 }
 
 model OrganizationMember {
@@ -459,4 +461,27 @@ model WebhookDelivery {
   createdAt    DateTime @default(now())
 
   @@index([webhookId, createdAt])
+}
+
+// ─── Email digest / outbox log (blueprint §34) ──────────────
+// In the sandbox there is no SMTP provider, so "sending" records a
+// simulated delivery in an auditable outbox — swappable for a real
+// provider by flipping EmailLog.status to QUEUED/SENT in sendEmail().
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  kind      String   // DAILY_DIGEST | WEEKLY_DIGEST
+  toEmail   String
+  subject   String
+  body      String
+  status    String   @default("SIMULATED") // SIMULATED | SENT | FAILED
+  meta      String?  // JSON — e.g. { trigger: "manual" | "cron", counts: {...} }
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([userId, createdAt])
 }

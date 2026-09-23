@@ -1,0 +1,715 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * RoadmapView — Gantt-style timeline for a project.
+     5→ *
+     6→ * • Sprint bands (ACTIVE / FUTURE / COMPLETED) on a shared day grid.
+     7→ * • Epic bars (startDate → dueDate) with child-completion progress.
+     8→ * • Drag a bar to move it, drag its edges to resize — commits via PATCH.
+     9→ * • Unscheduled epics get a quick inline date popover.
+    10→ * • Month/Quarter zoom, today marker, sticky left label column.
+    11→ */
+    12→
+    13→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+    14→import {
+    15→  addDays,
+    16→  differenceInCalendarDays,
+    17→  endOfMonth,
+    18→  format,
+    19→  isSameDay,
+    20→  startOfDay,
+    21→  startOfMonth,
+    22→} from "date-fns";
+    23→import {
+    24→  CalendarRange,
+    25→  ChevronDown,
+    26→  ChevronRight,
+    27→  Flag,
+    28→  Inbox,
+    29→  Loader2,
+    30→  Target,
+    31→  Zap,
+    32→} from "lucide-react";
+    33→import { toast } from "sonner";
+    34→
+    35→import { api } from "@/lib/api-client";
+    36→import { usePortalStore } from "@/lib/portal-store";
+    37→import type { IssueDTO, SprintDTO } from "@/lib/portal-types";
+    38→import { cn } from "@/lib/utils";
+    39→import { Button } from "@/components/ui/button";
+    40→import { Input } from "@/components/ui/input";
+    41→import { Label } from "@/components/ui/label";
+    42→import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+    43→import { useProjectData } from "./project-data";
+    44→import { IssueTypeIcon } from "./IssueTypeIcon";
+    45→import { KeyBadge } from "./KeyBadge";
+    46→import { EmptyState } from "./EmptyState";
+    47→
+    48→type Zoom = "month" | "quarter";
+    49→type DragMode = "move" | "resize-l" | "resize-r";
+    50→
+    51→const LABEL_W = 232;
+    52→const DAY_W: Record<Zoom, number> = { month: 9, quarter: 3.5 };
+    53→const ROW_H = 40;
+    54→
+    55→interface DragState {
+    56→  issueId: string;
+    57→  mode: DragMode;
+    58→  startX: number;
+    59→  deltaDays: number;
+    60→}
+    61→
+    62→/** Local copy of an epic's schedule used while dragging/previewing. */
+    63→interface ScheduleOverride {
+    64→  start: Date;
+    65→  end: Date;
+    66→}
+    67→
+    68→function toDay(v: string | Date): Date {
+    69→  return startOfDay(typeof v === "string" ? new Date(v) : v);
+    70→}
+    71→
+    72→function isoDay(d: Date): string {
+    73→  return d.toISOString();
+    74→}
+    75→
+    76→function hexAlpha(hex: string, alpha: string): string {
+    77→  return `${hex}${alpha}`;
+    78→}
+    79→
+    80→export function RoadmapView() {
+    81→  const { data, applyIssue } = useProjectData();
+    82→  const setOpenIssue = usePortalStore((s) => s.setOpenIssue);
+    83→  const types = usePortalStore((s) => s.workspace?.issueTypes ?? []);
+    84→  const [zoom, setZoom] = useState<Zoom>("month");
+    85→  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+    86→  const [drag, setDrag] = useState<DragState | null>(null);
+    87→  const [overrides, setOverrides] = useState<Map<string, ScheduleOverride>>(new Map());
+    88→  const scrollRef = useRef<HTMLDivElement>(null);
+    89→  const dragRef = useRef<DragState | null>(null);
+    90→
+    91→  useEffect(() => {
+    92→    dragRef.current = drag;
+    93→  }, [drag]);
+    94→
+    95→  const dayW = DAY_W[zoom];
+    96→
+    97→  const epics = useMemo(() => {
+    98→    if (!data) return [];
+    99→    const epicTypeNames = new Set(["epic"]);
+   100→    const epicTypeIds = new Set(
+   101→      types.filter((t) => epicTypeNames.has(t.name.toLowerCase())).map((t) => t.id)
+   102→    );
+   103→    const byId = new Map(data.issues.map((i) => [i.id, i]));
+   104→    const isEpic = (i: IssueDTO) => epicTypeIds.has(i.typeId) || (!i.parentId && byId.has(i.parentId ?? ""));
+   105→    return data.issues
+   106→      .filter((i) => epicTypeIds.has(i.typeId) || data.issues.some((c) => c.parentId === i.id))
+   107→      .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }))
+   108→      .map((epic) => ({
+   109→        epic,
+   110→        children: data.issues
+   111→          .filter((i) => i.parentId === epic.id)
+   112→          .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true })),
+   113→      }));
+   114→  }, [data, types]);
+   115→
+   116→  /** Computed schedule for an epic, honoring explicit dates then children. */
+   117→  const scheduleOf = useCallback(
+   118→    (epic: IssueDTO): { start: Date | null; end: Date | null } => {
+   119→      if (epic.startDate && epic.dueDate) return { start: toDay(epic.startDate), end: toDay(epic.dueDate) };
+   120→      const children = data?.issues.filter((i) => i.parentId === epic.id) ?? [];
+   121→      const starts: Date[] = [];
+   122→      const ends: Date[] = [];
+   123→      if (epic.startDate) starts.push(toDay(epic.startDate));
+   124→      if (epic.dueDate) ends.push(toDay(epic.dueDate));
+   125→      for (const c of children) {
+   126→        if (c.startDate) starts.push(toDay(c.startDate));
+   127→        if (c.dueDate) ends.push(toDay(c.dueDate));
+   128→      }
+   129→      const start = starts.length ? new Date(Math.min(...starts.map((d) => d.getTime()))) : null;
+   130→      const end = ends.length ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;
+   131→      return { start, end: end ?? start };
+   132→    },
+   133→    [data]
+   134→  );
+   135→
+   136→  // ── Timeline window ────────────────────────────────────────────
+   137→  const window_ = useMemo(() => {
+   138→    if (!data) return null;
+   139→    const stamps: Date[] = [];
+   140→    for (const s of data.sprints) {
+   141→      if (s.startDate) stamps.push(toDay(s.startDate));
+   142→      if (s.endDate) stamps.push(toDay(s.endDate));
+   143→    }
+   144→    for (const e of epics) {
+   145→      const { start, end } = scheduleOf(e.epic);
+   146→      if (start) stamps.push(start);
+   147→      if (end) stamps.push(end);
+   148→      for (const c of e.children) if (c.dueDate) stamps.push(toDay(c.dueDate));
+   149→    }
+   150→    const today = toDay(new Date());
+   151→    let min = stamps.length ? new Date(Math.min(...stamps.map((d) => d.getTime()))) : addDays(today, -14);
+   152→    let max = stamps.length ? new Date(Math.max(...stamps.map((d) => d.getTime()))) : addDays(today, 60);
+   153→    min = startOfMonth(addDays(min, -7));
+   154→    max = endOfMonth(addDays(max, 14));
+   155→    if (min > addDays(today, -1)) min = startOfMonth(addDays(today, -30));
+   156→    if (max < addDays(today, 1)) max = endOfMonth(addDays(today, 45));
+   157→    if (differenceInCalendarDays(max, min) < 80) max = addDays(min, 100);
+   158→    return { min, max, totalDays: differenceInCalendarDays(max, min) + 1, today };
+   159→  }, [data, epics, scheduleOf]);
+   160→
+   161→  const timelineW = (window_?.totalDays ?? 1) * dayW;
+   162→
+   163→  const months = useMemo(() => {
+   164→    if (!window_) return [];
+   165→    const out: { label: string; left: number; width: number; thisMonth: boolean }[] = [];
+   166→    let cur = startOfMonth(window_.min);
+   167→    while (cur <= window_.max) {
+   168→      const next = startOfMonth(addDays(endOfMonth(cur), 1));
+   169→      const from = Math.max(differenceInCalendarDays(cur, window_.min), 0);
+   170→      const to = Math.min(differenceInCalendarDays(next, window_.min), window_.totalDays);
+   171→      out.push({
+   172→        label: format(cur, zoom === "month" ? "MMMM yyyy" : "MMM"),
+   173→        left: from * dayW,
+   174→        width: (to - from) * dayW,
+   175→        thisMonth: isSameDay(cur, startOfMonth(window_.today)),
+   176→      });
+   177→      cur = next;
+   178→    }
+   179→    return out;
+   180→  }, [window_, dayW, zoom]);
+   181→
+   182→  const todayLeft = window_ ? differenceInCalendarDays(window_.today, window_.min) * dayW + dayW / 2 : 0;
+   183→
+   184→  // ── Drag handling ──────────────────────────────────────────────
+   185→  function onBarPointerDown(e: React.PointerEvent, epic: IssueDTO, mode: DragMode) {
+   186→    if (e.button !== 0) return;
+   187→    e.preventDefault();
+   188→    e.stopPropagation();
+   189→    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+   190→    setDrag({ issueId: epic.id, mode, startX: e.clientX, deltaDays: 0 });
+   191→  }
+   192→
+   193→  function onBarPointerMove(e: React.PointerEvent) {
+   194→    const d = dragRef.current;
+   195→    if (!d || !window_) return;
+   196→    const raw = Math.round((e.clientX - d.startX) / dayW);
+   197→    const delta = Math.max(raw, 0 - window_.totalDays);
+   198→    if (delta !== d.deltaDays) setDrag({ ...d, deltaDays: delta });
+   199→  }
+   200→
+   201→  async function onBarPointerUp(epic: IssueDTO, base: { start: Date; end: Date }) {
+   202→    const d = dragRef.current;
+   203→    setDrag(null);
+   204→    if (!d) return;
+   205→    const wasDrag = d.deltaDays !== 0;
+   206→
+   207→    if (!wasDrag) {
+   208→      if (d.mode === "move") setOpenIssue(epic.id); // simple click
+   209→      return;
+   210→    }
+   211→
+   212→    let start = base.start;
+   213→    let end = base.end;
+   214→    if (d.mode === "move") {
+   215→      start = addDays(start, d.deltaDays);
+   216→      end = addDays(end, d.deltaDays);
+   217→    } else if (d.mode === "resize-l") {
+   218→      start = addDays(start, d.deltaDays);
+   219→      if (start > end) start = end;
+   220→    } else {
+   221→      end = addDays(end, d.deltaDays);
+   222→      if (end < start) end = start;
+   223→    }
+   224→
+   225→    // Optimistic visual
+   226→    setOverrides((m) => new Map(m).set(epic.id, { start, end }));
+   227→    try {
+   228→      const updated = await api.patchIssue(epic.id, { startDate: isoDay(start), dueDate: isoDay(end) });
+   229→      applyIssue(updated);
+   230→      setOverrides((m) => {
+   231→        const next = new Map(m);
+   232→        next.delete(epic.id);
+   233→        return next;
+   234→      });
+   235→      toast.success(`${epic.key} scheduled ${format(start, "MMM d")} → ${format(end, "MMM d")}`);
+   236→    } catch (err) {
+   237→      toast.error(err instanceof Error ? err.message : "Failed to reschedule");
+   238→      setOverrides((m) => {
+   239→        const next = new Map(m);
+   240→        next.delete(epic.id);
+   241→        return next;
+   242→      });
+   243→    }
+   244→  }
+   245→
+   246→  function toggleCollapsed(id: string) {
+   247→    setCollapsed((s) => {
+   248→      const next = new Set(s);
+   249→      if (next.has(id)) next.delete(id);
+   250→      else next.add(id);
+   251→      return next;
+   252→    });
+   253→  }
+   254→
+   255→  function scrollToToday() {
+   256→    scrollRef.current?.scrollTo({ left: Math.max(todayLeft - 240, 0), behavior: "smooth" });
+   257→  }
+   258→
+   259→  if (!data || !window_) return null;
+   260→
+   261→  const sprintsWithDates = data.sprints.filter((s) => s.startDate && s.endDate);
+   262→  const unscheduled = epics.filter(({ epic }) => {
+   263→    const { start } = scheduleOf(epic);
+   264→    return !start;
+   265→  });
+   266→
+   267→  return (
+   268→    <div className="flex h-full flex-col p-3 sm:p-4">
+   269→      {/* Toolbar */}
+   270→      <div className="flex flex-wrap items-center gap-2">
+   271→        <div className="flex items-center rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Timeline zoom">
+   272→          {(["month", "quarter"] as Zoom[]).map((z) => (
+   273→            <button
+   274→              key={z}
+   275→              type="button"
+   276→              onClick={() => setZoom(z)}
+   277→              aria-pressed={zoom === z}
+   278→              className={cn(
+   279→                "rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+   280→                zoom === z ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+   281→              )}
+   282→            >
+   283→              {z}
+   284→            </button>
+   285→          ))}
+   286→        </div>
+   287→        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={scrollToToday}>
+   288→          <Target className="size-3.5" aria-hidden /> Today
+   289→        </Button>
+   290→        <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground">
+   291→          <span className="flex items-center gap-1.5">
+   292→            <span className="inline-block size-2.5 rounded-sm" style={{ backgroundColor: hexAlpha(data.project.color, "cc") }} aria-hidden />
+   293→            Epic
+   294→          </span>
+   295→          <span className="flex items-center gap-1.5">
+   296→            <span className="inline-block size-2.5 rounded-full bg-emerald-500" aria-hidden /> Done sprint
+   297→          </span>
+   298→          <span className="flex items-center gap-1.5">
+   299→            <span className="inline-block size-2.5 rounded-full bg-amber-500" aria-hidden /> Active sprint
+   300→          </span>
+   301→          <span className="hidden items-center gap-1.5 md:flex">Drag bars to reschedule</span>
+   302→        </div>
+   303→      </div>
+   304→
+   305→      {epics.length === 0 ? (
+   306→        <div className="flex min-h-0 flex-1 items-center justify-center">
+   307→          <EmptyState
+   308→            icon={CalendarRange}
+   309→            title="Nothing to map yet"
+   310→            hint="Create epics (or parent issues with subtasks) to see them on the roadmap."
+   311→          />
+   312→        </div>
+   313→      ) : (
+   314→        <div
+   315→          ref={scrollRef}
+   316→          className={cn(
+   317→            "relative mt-3 min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-card",
+   318→            drag && "select-none",
+   319→            "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 dark:[&::-webkit-scrollbar-thumb]:bg-stone-600 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2"
+   320→          )}
+   321→        >
+   322→          <div className="relative" style={{ width: LABEL_W + timelineW, minWidth: "100%" }}>
+   323→            {/* ── Header: sticky month band ── */}
+   324→            <div className="sticky top-0 z-20 flex h-10 border-b border-border bg-card/95 backdrop-blur">
+   325→              <div
+   326→                className="sticky left-0 z-10 flex shrink-0 items-center border-r border-border bg-card px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+   327→                style={{ width: LABEL_W }}
+   328→              >
+   329→                Roadmap
+   330→              </div>
+   331→              <div className="relative h-full" style={{ width: timelineW }}>
+   332→                {months.map((m) => (
+   333→                  <div
+   334→                    key={m.label + m.left}
+   335→                    className={cn(
+   336→                      "absolute inset-y-0 flex items-center overflow-hidden whitespace-nowrap border-l border-border/70 px-2 text-[11px] font-semibold",
+   337→                      m.thisMonth ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-muted-foreground"
+   338→                    )}
+   339→                    style={{ left: m.left, width: m.width }}
+   340→                  >
+   341→                    {zoom === "quarter" ? m.label : m.label}
+   342→                  </div>
+   343→                ))}
+   344→              </div>
+   345→            </div>
+   346→
+   347→            {/* ── Sprint bands ── */}
+   348→            {sprintsWithDates.length > 0 && (
+   349→              <div className="relative flex border-b border-border/60 bg-muted/30" style={{ height: ROW_H }}>
+   350→                <div
+   351→                  className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+   352→                  style={{ width: LABEL_W }}
+   353→                >
+   354→                  <Zap className="size-3 text-amber-500" aria-hidden /> Sprints
+   355→                </div>
+   356→                <div className="relative" style={{ width: timelineW }}>
+   357→                  {sprintsWithDates.map((sprint) => (
+   358→                    <SprintBand key={sprint.id} sprint={sprint} min={window_.min} dayW={dayW} />
+   359→                  ))}
+   360→                </div>
+   361→              </div>
+   362→            )}
+   363→
+   364→            {/* ── Epic + child rows ── */}
+   365→            <div className="relative">
+   366→              {/* today line spanning all rows */}
+   367→              <div
+   368→                className="pointer-events-none absolute bottom-0 top-0 z-10 w-px"
+   369→                style={{ left: LABEL_W + todayLeft }}
+   370→                aria-hidden
+   371→              >
+   372→                <div className="h-full w-px bg-amber-500/70" />
+   373→                <div className="absolute -top-0 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-b bg-amber-500 px-1 text-[9px] font-bold text-white">
+   374→                  TODAY
+   375→                </div>
+   376→              </div>
+   377→
+   378→              {epics.map(({ epic, children }) => {
+   379→                const base = scheduleOf(epic);
+   380→                const ovr = overrides.get(epic.id);
+   381→                const dragState = drag?.issueId === epic.id ? drag : null;
+   382→                const start = dragState ? addDays(base.start ?? window_.today, 0) : base.start;
+   383→                const end = dragState ? addDays(base.end ?? base.start ?? window_.today, dragState.deltaDays) : (ovr ? ovr.end : base.end);
+   384→                const startPos = dragState?.mode === "resize-l" && base.start ? addDays(base.start, dragState.deltaDays) : start;
+   385→                const isCollapsed = collapsed.has(epic.id);
+   386→                const doneChildren = children.filter((c) => c.status.category === "DONE").length;
+   387→                const progress = children.length ? doneChildren / children.length : epic.status.category === "DONE" ? 1 : 0;
+   388→
+   389→                if (!base.start && !dragState) {
+   390→                  return (
+   391→                    <EpicRowLabel
+   392→                      key={epic.id}
+   393→                      epic={epic}
+   394→                      progress={progress}
+   395→                      childrenCount={children.length}
+   396→                      open={children.length > 0 && !isCollapsed}
+   397→                      onToggle={() => toggleCollapsed(epic.id)}
+   398→                      onOpen={() => setOpenIssue(epic.id)}
+   399→                    />
+   400→                  );
+   401→                }
+   402→
+   403→                const s = startPos ?? window_.today;
+   404→                const e2 = end ?? addDays(s, 13);
+   405→                const left = Math.max(differenceInCalendarDays(s, window_.min), 0) * dayW;
+   406→                const width = Math.max((differenceInCalendarDays(e2, s) + 1) * dayW, dayW * 5);
+   407→
+   408→                return (
+   409→                  <div key={epic.id}>
+   410→                    <div className="relative flex border-b border-border/40 hover:bg-muted/20" style={{ height: ROW_H }}>
+   411→                      <EpicRowLabel
+   412→                        epic={epic}
+   413→                        progress={progress}
+   414→                        childrenCount={children.length}
+   415→                        open={children.length > 0 && !isCollapsed}
+   416→                        onToggle={() => toggleCollapsed(epic.id)}
+   417→                        onOpen={() => setOpenIssue(epic.id)}
+   418→                      />
+   419→                      <div className="relative" style={{ width: timelineW }}>
+   420→                        <div
+   421→                          role="button"
+   422→                          tabIndex={0}
+   423→                          aria-label={`Epic ${epic.key}: ${epic.summary}, ${format(s, "MMM d")} to ${format(e2, "MMM d")}`}
+   424→                          className={cn(
+   425→                            "group absolute top-1/2 flex h-[26px] -translate-y-1/2 cursor-grab touch-none items-center overflow-hidden rounded-md border shadow-sm transition-shadow active:cursor-grabbing",
+   426→                            dragState ? "z-20 shadow-lg ring-2 ring-amber-500/50" : "hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+   427→                            epic.status.category === "DONE" && "opacity-80"
+   428→                          )}
+   429→                          style={{
+   430→                            left,
+   431→                            width,
+   432→                            backgroundColor: hexAlpha(data.project.color, "2e"),
+   433→                            borderColor: hexAlpha(data.project.color, "88"),
+   434→                          }}
+   435→                          onPointerDown={(ev) => onBarPointerDown(ev, epic, "move")}
+   436→                          onPointerMove={onBarPointerMove}
+   437→                          onPointerUp={() => void onBarPointerUp(epic, { start: base.start ?? window_.today, end: base.end ?? addDays(base.start ?? window_.today, 13) })}
+   438→                          onKeyDown={(ev) => {
+   439→                            if (ev.key === "Enter") setOpenIssue(epic.id);
+   440→                          }}
+   441→                        >
+   442→                          {/* progress fill */}
+   443→                          <div
+   444→                            className="absolute inset-y-0 left-0 transition-[width] duration-300"
+   445→                            style={{ width: `${Math.round(progress * 100)}%`, backgroundColor: hexAlpha(data.project.color, "99") }}
+   446→                            aria-hidden
+   447→                          />
+   448→                          {/* resize handles */}
+   449→                          <span
+   450→                            aria-hidden
+   451→                            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize opacity-0 transition-opacity group-hover:opacity-100"
+   452→                            style={{ backgroundColor: hexAlpha(data.project.color, "cc") }}
+   453→                            onPointerDown={(ev) => onBarPointerDown(ev, epic, "resize-l")}
+   454→                            onPointerMove={onBarPointerMove}
+   455→                            onPointerUp={() => void onBarPointerUp(epic, { start: base.start ?? window_.today, end: base.end ?? addDays(base.start ?? window_.today, 13) })}
+   456→                          />
+   457→                          <span
+   458→                            aria-hidden
+   459→                            className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-ew-resize opacity-0 transition-opacity group-hover:opacity-100"
+   460→                            style={{ backgroundColor: hexAlpha(data.project.color, "cc") }}
+   461→                            onPointerDown={(ev) => onBarPointerDown(ev, epic, "resize-r")}
+   462→                            onPointerMove={onBarPointerMove}
+   463→                            onPointerUp={() => void onBarPointerUp(epic, { start: base.start ?? window_.today, end: base.end ?? addDays(base.start ?? window_.today, 13) })}
+   464→                          />
+   465→                          <span className="pointer-events-none relative z-[5] flex w-full items-center gap-1.5 px-2 text-[11px] font-semibold text-foreground">
+   466→                            <span className="shrink-0 opacity-70">{epic.key}</span>
+   467→                            <span className="truncate">{epic.summary}</span>
+   468→                            <span className="ml-auto hidden shrink-0 rounded bg-background/70 px-1 text-[9px] font-medium text-muted-foreground sm:inline">
+   469→                              {format(s, "MMM d")} → {format(e2, "MMM d")}
+   470→                            </span>
+   471→                          </span>
+   472→                        </div>
+   473→                      </div>
+   474→                    </div>
+   475→
+   476→                    {/* children */}
+   477→                    {!isCollapsed &&
+   478→                      children.map((child) => (
+   479→                        <ChildRow key={child.id} child={child} min={window_.min} dayW={dayW} labelW={LABEL_W} timelineW={timelineW} onOpen={() => setOpenIssue(child.id)} />
+   480→                      ))}
+   481→                  </div>
+   482→                );
+   483→              })}
+   484→            </div>
+   485→
+   486→            {/* ── Unscheduled epics ── */}
+   487→            {unscheduled.length > 0 && (
+   488→              <div className="border-t border-border bg-muted/30">
+   489→                <div className="flex items-center gap-2 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+   490→                  <Inbox className="size-3.5" aria-hidden /> Unscheduled — pick dates to map them
+   491→                </div>
+   492→                <ul className="space-y-1 px-3 pb-3">
+   493→                  {unscheduled.map(({ epic }) => (
+   494→                    <li key={epic.id} className="flex items-center gap-2 rounded-md border border-dashed border-border bg-card px-2.5 py-1.5">
+   495→                      <IssueTypeIcon type={epic.type} size={13} />
+   496→                      <button
+   497→                        type="button"
+   498→                        onClick={() => setOpenIssue(epic.id)}
+   499→                        className="min-w-0 flex-1 truncate text-left text-xs font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   500→                      >
+   501→                        <KeyBadge>{epic.key}</KeyBadge> {epic.summary}
+   502→                      </button>
+   503→                      <SchedulePopover epic={epic} onScheduled={applyIssue} />
+   504→                    </li>
+   505→                  ))}
+   506→                </ul>
+   507→              </div>
+   508→            )}
+   509→          </div>
+   510→        </div>
+   511→      )}
+   512→    </div>
+   513→  );
+   514→}
+   515→
+   516→// ─── Sub-components ─────────────────────────────────────────────
+   517→
+   518→function EpicRowLabel({
+   519→  epic,
+   520→  progress,
+   521→  childrenCount,
+   522→  open,
+   523→  onToggle,
+   524→  onOpen,
+   525→}: {
+   526→  epic: IssueDTO;
+   527→  progress: number;
+   528→  childrenCount: number;
+   529→  open: boolean;
+   530→  onToggle: () => void;
+   531→  onOpen: () => void;
+   532→}) {
+   533→  return (
+   534→    <div
+   535→      className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-2.5"
+   536→      style={{ width: LABEL_W }}
+   537→    >
+   538→      {childrenCount > 0 ? (
+   539→        <button
+   540→          type="button"
+   541→          onClick={onToggle}
+   542→          aria-label={open ? `Collapse ${epic.key}` : `Expand ${epic.key}`}
+   543→          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   544→        >
+   545→          {open ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}
+   546→        </button>
+   547→      ) : (
+   548→        <span className="w-[19px]" aria-hidden />
+   549→      )}
+   550→      <button
+   551→        type="button"
+   552→        onClick={onOpen}
+   553→        className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   554→        aria-label={`Open issue ${epic.key}`}
+   555→      >
+   556→        <IssueTypeIcon type={epic.type} size={13} />
+   557→        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{epic.summary}</span>
+   558→      </button>
+   559→      {childrenCount > 0 && (
+   560→        <span
+   561→          className={cn(
+   562→            "shrink-0 rounded px-1 py-px text-[9px] font-bold tabular-nums",
+   563→            progress >= 1 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground"
+   564→          )}
+   565→        >
+   566→          {Math.round(progress * 100)}%
+   567→        </span>
+   568→      )}
+   569→    </div>
+   570→  );
+   571→}
+   572→
+   573→function ChildRow({
+   574→  child,
+   575→  min,
+   576→  dayW,
+   577→  labelW,
+   578→  timelineW,
+   579→  onOpen,
+   580→}: {
+   581→  child: IssueDTO;
+   582→  min: Date;
+   583→  dayW: number;
+   584→  labelW: number;
+   585→  timelineW: number;
+   586→  onOpen: () => void;
+   587→}) {
+   588→  const done = child.status.category === "DONE";
+   589→  const start = child.startDate ? toDay(child.startDate) : toDay(child.createdAt);
+   590→  const due = child.dueDate ? toDay(child.dueDate) : null;
+   591→  const left = Math.max(differenceInCalendarDays(start, min), 0) * dayW;
+   592→  const width = due ? Math.max((differenceInCalendarDays(due, start) + 1) * dayW, dayW * 2) : dayW * 2;
+   593→
+   594→  return (
+   595→    <div className="relative flex border-b border-border/30 bg-muted/20" style={{ height: 32 }}>
+   596→      <div
+   597→        className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-2.5 pl-8"
+   598→        style={{ width: labelW }}
+   599→      >
+   600→        <button
+   601→          type="button"
+   602→          onClick={onOpen}
+   603→          className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   604→          aria-label={`Open issue ${child.key}`}
+   605→        >
+   606→          <IssueTypeIcon type={child.type} size={11} />
+   607→          <KeyBadge>{child.key}</KeyBadge>
+   608→          <span className={cn("min-w-0 flex-1 truncate text-[11px]", done ? "text-muted-foreground/70 line-through" : "text-foreground/90")}>
+   609→            {child.summary}
+   610→          </span>
+   611→        </button>
+   612→      </div>
+   613→      <div className="relative" style={{ width: timelineW }}>
+   614→        <button
+   615→          type="button"
+   616→          onClick={onOpen}
+   617→          className={cn(
+   618→            "absolute top-1/2 h-3.5 -translate-y-1/2 rounded-full border transition-shadow hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+   619→            done ? "border-emerald-500/60 bg-emerald-500/60" : "border-stone-400/70 bg-stone-400/50 dark:border-stone-500/70 dark:bg-stone-500/50"
+   620→          )}
+   621→          style={{ left, width }}
+   622→          aria-label={`${child.key} ${child.summary} timeline bar`}
+   623→        >
+   624→          {child.storyPoints != null && (
+   625→            <span className="absolute -right-1 -top-3 rounded bg-muted px-1 text-[8px] font-semibold text-muted-foreground">
+   626→              {child.storyPoints}pt
+   627→            </span>
+   628→          )}
+   629→        </button>
+   630→      </div>
+   631→    </div>
+   632→  );
+   633→}
+   634→
+   635→function SprintBand({ sprint, min, dayW }: { sprint: SprintDTO; min: Date; dayW: number }) {
+   636→  const start = toDay(sprint.startDate!);
+   637→  const end = toDay(sprint.endDate!);
+   638→  const left = Math.max(differenceInCalendarDays(start, min), 0) * dayW;
+   639→  const width = Math.max((differenceInCalendarDays(end, start) + 1) * dayW, dayW * 3);
+   640→  const palette =
+   641→    sprint.status === "ACTIVE"
+   642→      ? "border-amber-500/60 bg-amber-500/25 text-amber-800 dark:text-amber-300"
+   643→      : sprint.status === "COMPLETED"
+   644→        ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+   645→        : "border-stone-400/50 bg-stone-400/20 text-stone-600 dark:text-stone-300";
+   646→
+   647→  return (
+   648→    <div
+   649→      className={cn("absolute top-1/2 flex h-6 -translate-y-1/2 items-center overflow-hidden rounded-full border px-2.5", palette)}
+   650→      style={{ left, width }}
+   651→      title={`${sprint.name}: ${format(start, "MMM d")} – ${format(end, "MMM d")}`}
+   652→    >
+   653→      <span className="truncate text-[10px] font-semibold">{sprint.name}</span>
+   654→    </div>
+   655→  );
+   656→}
+   657→
+   658→function SchedulePopover({
+   659→  epic,
+   660→  onScheduled,
+   661→}: {
+   662→  epic: IssueDTO;
+   663→  onScheduled: (i: IssueDTO) => void;
+   664→}) {
+   665→  const [start, setStart] = useState("");
+   666→  const [due, setDue] = useState("");
+   667→  const [busy, setBusy] = useState(false);
+   668→  const [open, setOpen] = useState(false);
+   669→
+   670→  async function apply() {
+   671→    if (!start || !due) return;
+   672→    if (new Date(start) > new Date(due)) {
+   673→      toast.error("Start must be before due date");
+   674→      return;
+   675→    }
+   676→    setBusy(true);
+   677→    try {
+   678→      const updated = await api.patchIssue(epic.id, {
+   679→        startDate: new Date(`${start}T12:00:00`).toISOString(),
+   680→        dueDate: new Date(`${due}T12:00:00`).toISOString(),
+   681→      });
+   682→      onScheduled(updated);
+   683→      toast.success(`${epic.key} scheduled`);
+   684→      setOpen(false);
+   685→    } catch (err) {
+   686→      toast.error(err instanceof Error ? err.message : "Failed to schedule");
+   687→    } finally {
+   688→      setBusy(false);
+   689→    }
+   690→  }
+   691→
+   692→  return (
+   693→    <Popover open={open} onOpenChange={setOpen}>
+   694→      <PopoverTrigger asChild>
+   695→        <Button variant="outline" size="sm" className="h-7 gap-1 rounded-full px-2.5 text-[11px]">
+   696→          <Flag className="size-3" aria-hidden /> Schedule
+   697→        </Button>
+   698→      </PopoverTrigger>
+   699→      <PopoverContent align="end" className="w-64 space-y-3">
+   700→        <div className="space-y-1.5">
+   701→          <Label htmlFor={`sched-start-${epic.id}`} className="text-xs">Start date</Label>
+   702→          <Input id={`sched-start-${epic.id}`} type="date" value={start} onChange={(e) => setStart(e.target.value)} className="h-8" />
+   703→        </div>
+   704→        <div className="space-y-1.5">
+   705→          <Label htmlFor={`sched-due-${epic.id}`} className="text-xs">Due date</Label>
+   706→          <Input id={`sched-due-${epic.id}`} type="date" value={due} min={start || undefined} onChange={(e) => setDue(e.target.value)} className="h-8" />
+   707→        </div>
+   708→        <Button size="sm" className="w-full bg-amber-600 hover:bg-amber-700" disabled={busy || !start || !due} onClick={() => void apply()}>
+   709→          {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null} Put on roadmap
+   710→        </Button>
+   711→      </PopoverContent>
+   712→    </Popover>
+   713→  );
+   714→}
+   715→
