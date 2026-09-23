@@ -1,0 +1,758 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useState } from "react";
+     4→import {
+     5→  ArrowRight,
+     6→  CheckCircle2,
+     7→  CircleSlash,
+     8→  Filter,
+     9→  FlaskConical,
+    10→  GitBranch,
+    11→  History,
+    12→  Loader2,
+    13→  Play,
+    14→  Plus,
+    15→  Trash2,
+    16→  Zap,
+    17→} from "lucide-react";
+    18→import { toast } from "sonner";
+    19→
+    20→import { api2 } from "@/lib/api-client";
+    21→import { usePortalStore } from "@/lib/portal-store";
+    22→import type {
+    23→  AutomationActionDTO,
+    24→  AutomationConditionDTO,
+    25→  AutomationRuleDTO,
+    26→} from "@/lib/portal-types";
+    27→import { Avatar } from "./Avatar";
+    28→import { Button } from "@/components/ui/button";
+    29→import {
+    30→  Dialog,
+    31→  DialogContent,
+    32→  DialogDescription,
+    33→  DialogFooter,
+    34→  DialogHeader,
+    35→  DialogTitle,
+    36→} from "@/components/ui/dialog";
+    37→import { Input } from "@/components/ui/input";
+    38→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    39→import { Skeleton } from "@/components/ui/skeleton";
+    40→import { Switch } from "@/components/ui/switch";
+    41→import { EmptyState } from "./EmptyState";
+    42→import { cn } from "@/lib/utils";
+    43→import { formatDistanceToNow } from "date-fns";
+    44→
+    45→const TRIGGERS = [
+    46→  { value: "issue.created", label: "Issue is created" },
+    47→  { value: "issue.status_changed", label: "Status changes" },
+    48→  { value: "issue.assigned", label: "Issue is assigned" },
+    49→  { value: "comment.created", label: "Comment is added" },
+    50→];
+    51→
+    52→const CONDITION_FIELDS = [
+    53→  { value: "type", label: "Type" },
+    54→  { value: "status", label: "Status" },
+    55→  { value: "priority", label: "Priority" },
+    56→  { value: "assignee", label: "Assignee" },
+    57→  { value: "summary", label: "Summary" },
+    58→  { value: "points", label: "Story points" },
+    59→  { value: "label", label: "Label" },
+    60→];
+    61→
+    62→const OPERATORS = [
+    63→  { value: "equals", label: "equals" },
+    64→  { value: "notEquals", label: "does not equal" },
+    65→  { value: "contains", label: "contains" },
+    66→];
+    67→
+    68→type ValueKind = "status" | "type" | "priority" | "member" | "label" | "free" | "none" | "list";
+    69→
+    70→const ACTIONS: { value: string; label: string; valueKind: ValueKind }[] = [
+    71→  { value: "assign_user", label: "Assign to member", valueKind: "member" },
+    72→  { value: "unassign", label: "Clear assignee", valueKind: "none" },
+    73→  { value: "transition_to", label: "Move to status", valueKind: "status" },
+    74→  { value: "set_priority", label: "Set priority", valueKind: "priority" },
+    75→  { value: "add_label", label: "Add label", valueKind: "label" },
+    76→  { value: "remove_label", label: "Remove label", valueKind: "label" },
+    77→  { value: "notify_assignee", label: "Notify assignee", valueKind: "none" },
+    78→  { value: "notify_user", label: "Notify member", valueKind: "member" },
+    79→];
+    80→
+    81→function ValueSelect({
+    82→  kind,
+    83→  value,
+    84→  onChange,
+    85→  options: optionsOverride,
+    86→}: {
+    87→  kind: ValueKind;
+    88→  value: string;
+    89→  onChange: (v: string) => void;
+    90→  /** Explicit option list — takes precedence over the workspace-derived ones. */
+    91→  options?: { value: string; label: string }[];
+    92→}) {
+    93→  const workspace = usePortalStore((s) => s.workspace);
+    94→  const options: { value: string; label: string }[] = optionsOverride ?? (() => {
+    95→    if (!workspace) return [];
+    96→    switch (kind) {
+    97→      case "status":
+    98→        return [...workspace.statuses].sort((a, b) => a.order - b.order).map((s) => ({ value: s.name, label: s.name }));
+    99→      case "type":
+   100→        return [...workspace.issueTypes].sort((a, b) => a.order - b.order).map((t) => ({ value: t.name, label: t.name }));
+   101→      case "priority":
+   102→        return [...workspace.priorities].sort((a, b) => a.order - b.order).map((p) => ({ value: p.name, label: p.name }));
+   103→      case "label":
+   104→        return workspace.labels.map((l) => ({ value: l.name, label: l.name }));
+   105→      case "member":
+   106→        return workspace.members.map((m) => ({ value: m.id, label: m.name }));
+   107→      default:
+   108→        return [];
+   109→    }
+   110→  })();
+   111→
+   112→  if (kind === "none") return <span className="text-xs italic text-muted-foreground">no value needed</span>;
+   113→  if (kind === "free") {
+   114→    return (
+   115→      <Input
+   116→        value={value}
+   117→        onChange={(e) => onChange(e.target.value)}
+   118→        placeholder="value"
+   119→        className="h-8 flex-1 text-xs"
+   120→      />
+   121→    );
+   122→  }
+   123→  return (
+   124→    <Select value={value} onValueChange={onChange}>
+   125→      <SelectTrigger className="h-8 min-w-32 flex-1 text-xs" aria-label="Value">
+   126→        <SelectValue placeholder="Pick value" />
+   127→      </SelectTrigger>
+   128→      <SelectContent>
+   129→        {options.map((o) => (
+   130→          <SelectItem key={o.value} value={o.value} className="text-xs">
+   131→            {o.label}
+   132→          </SelectItem>
+   133→        ))}
+   134→      </SelectContent>
+   135→    </Select>
+   136→  );
+   137→}
+   138→
+   139→function RuleDialog({
+   140→  open,
+   141→  onOpenChange,
+   142→  editing,
+   143→  onSaved,
+   144→}: {
+   145→  open: boolean;
+   146→  onOpenChange: (v: boolean) => void;
+   147→  editing: AutomationRuleDTO | null;
+   148→  onSaved: () => void;
+   149→}) {
+   150→  const [name, setName] = useState("");
+   151→  const [trigger, setTrigger] = useState("issue.status_changed");
+   152→  const [conditions, setConditions] = useState<AutomationConditionDTO[]>([]);
+   153→  const [actions, setActions] = useState<AutomationActionDTO[]>([{ type: "notify_assignee" }]);
+   154→  const [busy, setBusy] = useState(false);
+   155→  const [testing, setTesting] = useState(false);
+   156→  const [testResult, setTestResult] = useState<
+   157→    | {
+   158→        scanned: number;
+   159→        matchCount: number;
+   160→        truncated: boolean;
+   161→        matches: {
+   162→          id: string; key: string; summary: string;
+   163→          status: { name: string; color: string };
+   164→          type: { name: string };
+   165→          assignee: { id: string; name: string } | null;
+   166→          wouldApply: string[];
+   167→        }[];
+   168→      }
+   169→    | null
+   170→  >(null);
+   171→
+   172→  useEffect(() => {
+   173→    if (!open) return;
+   174→    if (editing) {
+   175→      setName(editing.name);
+   176→      setTrigger(editing.trigger);
+   177→      setConditions(editing.conditions.map((c) => ({ ...c })));
+   178→      setActions(editing.actions.map((a) => ({ ...a })));
+   179→    } else {
+   180→      setName("");
+   181→      setTrigger("issue.status_changed");
+   182→      setConditions([{ field: "type", operator: "equals", value: "Bug" }]);
+   183→      setActions([{ type: "notify_assignee" }]);
+   184→    }
+   185→  }, [open, editing]);
+   186→
+   187→  function conditionFieldKind(field: string): "list" | "free" {
+   188→    return field === "summary" ? "free" : "list";
+   189→  }
+   190→
+   191→  function conditionValueOptions(field: string): { value: string; label: string }[] {
+   192→    const workspace = usePortalStore.getState().workspace;
+   193→    if (!workspace) return [];
+   194→    switch (field) {
+   195→      case "type":
+   196→        return [...workspace.issueTypes].sort((a, b) => a.order - b.order).map((t) => ({ value: t.name, label: t.name }));
+   197→      case "status":
+   198→        return [...workspace.statuses].sort((a, b) => a.order - b.order).map((s) => ({ value: s.name, label: s.name }));
+   199→      case "priority":
+   200→        return [...workspace.priorities].sort((a, b) => a.order - b.order).map((p) => ({ value: p.name, label: p.name }));
+   201→      case "label":
+   202→        return workspace.labels.map((l) => ({ value: l.name, label: l.name }));
+   203→      case "assignee":
+   204→        return [
+   205→          { value: "me", label: "Me" },
+   206→          { value: "none", label: "Unassigned" },
+   207→        ];
+   208→      case "points":
+   209→        return ["1", "2", "3", "5", "8", "13"].map((n) => ({ value: n, label: n }));
+   210→      default:
+   211→        return [];
+   212→    }
+   213→  }
+   214→
+   215→  async function runTest() {
+   216→    setTesting(true);
+   217→    try {
+   218→      const res = await api2.testAutomation({
+   219→        conditions: conditions.filter((c) => c.value || conditionFieldKind(c.field) === "free"),
+   220→        actions: actions.map((a) => ({ type: a.type, value: a.value || undefined })),
+   221→      });
+   222→      setTestResult(res);
+   223→    } catch (err) {
+   224→      toast.error(err instanceof Error ? err.message : "Test run failed");
+   225→    } finally {
+   226→      setTesting(false);
+   227→    }
+   228→  }
+   229→
+   230→  async function submit() {
+   231→    if (!name.trim()) return toast.error("Give the rule a name");
+   232→    if (!actions.length) return toast.error("Add at least one action");
+   233→    setBusy(true);
+   234→    try {
+   235→      const payload = {
+   236→        name: name.trim(),
+   237→        trigger,
+   238→        conditions: conditions.filter((c) => c.value || conditionFieldKind(c.field) === "free"),
+   239→        actions: actions.map((a) => ({ type: a.type, value: a.value || undefined })),
+   240→      };
+   241→      if (editing) {
+   242→        await api2.patchAutomation(editing.id, payload);
+   243→        toast.success("Rule updated");
+   244→      } else {
+   245→        await api2.createAutomation(payload);
+   246→        toast.success("Automation created", { description: "It runs on the next matching event." });
+   247→      }
+   248→      onOpenChange(false);
+   249→      onSaved();
+   250→    } catch (err) {
+   251→      toast.error(err instanceof Error ? err.message : "Failed to save rule");
+   252→    } finally {
+   253→      setBusy(false);
+   254→    }
+   255→  }
+   256→
+   257→  return (
+   258→    <Dialog open={open} onOpenChange={onOpenChange}>
+   259→      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+   260→        <DialogHeader>
+   261→          <DialogTitle className="flex items-center gap-2">
+   262→            <Zap className="size-4 text-amber-600" aria-hidden />
+   263→            {editing ? "Edit automation" : "New automation"}
+   264→          </DialogTitle>
+   265→          <DialogDescription>When <em>trigger</em>, if <em>conditions</em>, then <em>actions</em>.</DialogDescription>
+   266→        </DialogHeader>
+   267→
+   268→        <div className="space-y-4">
+   269→          <div className="space-y-1.5">
+   270→            <label className="text-xs font-medium text-foreground" htmlFor="rule-name">Rule name</label>
+   271→            <Input
+   272→              id="rule-name"
+   273→              value={name}
+   274→              onChange={(e) => setName(e.target.value)}
+   275→              placeholder="e.g. Auto-notify on critical bugs"
+   276→            />
+   277→          </div>
+   278→
+   279→          {/* WHEN */}
+   280→          <div className="rounded-lg border border-border p-3">
+   281→            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700">
+   282→              <Play className="size-3" aria-hidden /> When
+   283→            </div>
+   284→            <Select value={trigger} onValueChange={setTrigger}>
+   285→              <SelectTrigger className="h-8 text-xs" aria-label="Trigger">
+   286→                <SelectValue />
+   287→              </SelectTrigger>
+   288→              <SelectContent>
+   289→                {TRIGGERS.map((t) => (
+   290→                  <SelectItem key={t.value} value={t.value} className="text-xs">
+   291→                    {t.label}
+   292→                  </SelectItem>
+   293→                ))}
+   294→              </SelectContent>
+   295→            </Select>
+   296→          </div>
+   297→
+   298→          {/* IF */}
+   299→          <div className="rounded-lg border border-border p-3">
+   300→            <div className="mb-2 flex items-center justify-between">
+   301→              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+   302→                <Filter className="size-3" aria-hidden /> If (all match)
+   303→              </div>
+   304→              <button
+   305→                type="button"
+   306→                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+   307→                onClick={() =>
+   308→                  setConditions((c) => [...c, { field: "type", operator: "equals", value: "Bug" }])
+   309→                }
+   310→              >
+   311→                <Plus className="size-3" aria-hidden /> Condition
+   312→              </button>
+   313→            </div>
+   314→            {conditions.length === 0 ? (
+   315→              <p className="py-1 text-xs italic text-muted-foreground">No conditions — always runs.</p>
+   316→            ) : (
+   317→              <div className="space-y-2">
+   318→                {conditions.map((cond, i) => (
+   319→                  <div key={i} className="flex items-center gap-1.5">
+   320→                    <Select
+   321→                      value={cond.field}
+   322→                      onValueChange={(v) =>
+   323→                        setConditions((c) => c.map((x, j) => (j === i ? { ...x, field: v, value: "" } : x)))
+   324→                      }
+   325→                    >
+   326→                      <SelectTrigger className="h-8 w-28 shrink-0 text-xs" aria-label="Field">
+   327→                        <SelectValue />
+   328→                      </SelectTrigger>
+   329→                      <SelectContent>
+   330→                        {CONDITION_FIELDS.map((f) => (
+   331→                          <SelectItem key={f.value} value={f.value} className="text-xs">
+   332→                            {f.label}
+   333→                          </SelectItem>
+   334→                        ))}
+   335→                      </SelectContent>
+   336→                    </Select>
+   337→                    <Select
+   338→                      value={cond.operator}
+   339→                      onValueChange={(v) =>
+   340→                        setConditions((c) => c.map((x, j) => (j === i ? { ...x, operator: v as AutomationConditionDTO["operator"] } : x)))
+   341→                      }
+   342→                    >
+   343→                      <SelectTrigger className="h-8 w-32 shrink-0 text-xs" aria-label="Operator">
+   344→                        <SelectValue />
+   345→                      </SelectTrigger>
+   346→                      <SelectContent>
+   347→                        {OPERATORS.map((o) => (
+   348→                          <SelectItem key={o.value} value={o.value} className="text-xs">
+   349→                            {o.label}
+   350→                          </SelectItem>
+   351→                        ))}
+   352→                      </SelectContent>
+   353→                    </Select>
+   354→                    {conditionFieldKind(cond.field) === "free" ? (
+   355→                      <Input
+   356→                        value={cond.value}
+   357→                        onChange={(e) =>
+   358→                          setConditions((c) => c.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
+   359→                        }
+   360→                        placeholder="text…"
+   361→                        className="h-8 flex-1 text-xs"
+   362→                      />
+   363→                    ) : (
+   364→                      <ValueSelect
+   365→                        kind="list"
+   366→                        options={conditionValueOptions(cond.field)}
+   367→                        value={cond.value}
+   368→                        onChange={(v) => setConditions((c) => c.map((x, j) => (j === i ? { ...x, value: v } : x)))}
+   369→                      />
+   370→                    )}
+   371→                    <button
+   372→                      type="button"
+   373→                      aria-label={`Remove condition ${i + 1}`}
+   374→                      className="rounded p-1 text-muted-foreground/60 hover:bg-rose-500/10 hover:text-rose-600"
+   375→                      onClick={() => setConditions((c) => c.filter((_, j) => j !== i))}
+   376→                    >
+   377→                      <Trash2 className="size-3.5" aria-hidden />
+   378→                    </button>
+   379→                  </div>
+   380→                ))}
+   381→              </div>
+   382→            )}
+   383→          </div>
+   384→
+   385→          {/* THEN */}
+   386→          <div className="rounded-lg border border-border p-3">
+   387→            <div className="mb-2 flex items-center justify-between">
+   388→              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+   389→                <GitBranch className="size-3" aria-hidden /> Then
+   390→              </div>
+   391→            </div>
+   392→            <div className="space-y-2">
+   393→              {actions.map((action, i) => {
+   394→                const meta = ACTIONS.find((a) => a.value === action.type);
+   395→                return (
+   396→                  <div key={i} className="flex items-center gap-1.5">
+   397→                    <Select
+   398→                      value={action.type}
+   399→                      onValueChange={(v) =>
+   400→                        setActions((a) => a.map((x, j) => (j === i ? { type: v, value: undefined } : x)))
+   401→                      }
+   402→                    >
+   403→                      <SelectTrigger className="h-8 min-w-40 flex-1 text-xs" aria-label="Action">
+   404→                        <SelectValue />
+   405→                      </SelectTrigger>
+   406→                      <SelectContent>
+   407→                        {ACTIONS.map((a) => (
+   408→                          <SelectItem key={a.value} value={a.value} className="text-xs">
+   409→                            {a.label}
+   410→                          </SelectItem>
+   411→                        ))}
+   412→                      </SelectContent>
+   413→                    </Select>
+   414→                    {meta?.valueKind && meta.valueKind !== "none" && (
+   415→                      <ValueSelect
+   416→                        kind={meta.valueKind}
+   417→                        value={action.value ?? ""}
+   418→                        onChange={(v) => setActions((a) => a.map((x, j) => (j === i ? { ...x, value: v } : x)))}
+   419→                      />
+   420→                    )}
+   421→                    <button
+   422→                      type="button"
+   423→                      aria-label={`Remove action ${i + 1}`}
+   424→                      className="rounded p-1 text-muted-foreground/60 hover:bg-rose-500/10 hover:text-rose-600"
+   425→                      onClick={() => setActions((a) => a.filter((_, j) => j !== i))}
+   426→                    >
+   427→                      <Trash2 className="size-3.5" aria-hidden />
+   428→                    </button>
+   429→                  </div>
+   430→                );
+   431→              })}
+   432→              <button
+   433→                type="button"
+   434→                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+   435→                onClick={() => setActions((a) => [...a, { type: "add_label", value: "" }])}
+   436→              >
+   437→                <Plus className="size-3" aria-hidden /> Action
+   438→              </button>
+   439→            </div>
+   440→          </div>
+   441→        </div>
+   442→
+   443→        {/* Test-run preview */}
+   444→        {(testing || testResult) && (
+   445→          <div
+   446→            className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3"
+   447→            aria-live="polite"
+   448→          >
+   449→            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+   450→              <FlaskConical className="size-3" aria-hidden /> Dry run — no changes applied
+   451→            </div>
+   452→            {testing ? (
+   453→              <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+   454→                <Loader2 className="size-3.5 animate-spin" aria-hidden /> Matching against the 50 most recently updated issues…
+   455→              </div>
+   456→            ) : testResult ? (
+   457→              testResult.matchCount === 0 ? (
+   458→                <p className="py-1 text-xs text-muted-foreground">
+   459→                  No issues out of the last {testResult.scanned} updated would match these conditions.
+   460→                </p>
+   461→              ) : (
+   462→                <div className="space-y-2">
+   463→                  <p className="text-xs text-muted-foreground">
+   464→                    <span className="font-semibold text-foreground">{testResult.matchCount}</span> of{" "}
+   465→                    {testResult.scanned} recent issues would match
+   466→                    {testResult.truncated ? " (showing first 10)" : ""}:
+   467→                  </p>
+   468→                  <ul className="max-h-44 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
+   469→                    {testResult.matches.map((m) => (
+   470→                      <li
+   471→                        key={m.id}
+   472→                        className="rounded-md border border-border/70 bg-card px-2.5 py-2"
+   473→                      >
+   474→                        <div className="flex items-center gap-2">
+   475→                          <span
+   476→                            className="size-2 shrink-0 rounded-full"
+   477→                            style={{ backgroundColor: m.status.color }}
+   478→                            aria-hidden
+   479→                          />
+   480→                          <span className="shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">{m.key}</span>
+   481→                          <span className="min-w-0 flex-1 truncate text-xs text-foreground">{m.summary}</span>
+   482→                        </div>
+   483→                        {m.wouldApply.length > 0 && (
+   484→                          <div className="mt-1.5 flex flex-wrap gap-1 pl-4">
+   485→                            {m.wouldApply.map((w, wi) => (
+   486→                              <span
+   487→                                key={wi}
+   488→                                className="rounded bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+   489→                              >
+   490→                                {w}
+   491→                              </span>
+   492→                            ))}
+   493→                          </div>
+   494→                        )}
+   495→                      </li>
+   496→                    ))}
+   497→                  </ul>
+   498→                </div>
+   499→              )
+   500→            ) : null}
+   501→          </div>
+   502→        )}
+   503→
+   504→        <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
+   505→          <Button
+   506→            type="button"
+   507→            variant="outline"
+   508→            className="gap-1.5"
+   509→            onClick={() => void runTest()}
+   510→            disabled={testing || busy}
+   511→            title="Preview which recent issues this rule would match — nothing is changed"
+   512→          >
+   513→            {testing ? (
+   514→              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+   515→            ) : (
+   516→              <FlaskConical className="size-3.5" aria-hidden />
+   517→            )}
+   518→            Test run
+   519→          </Button>
+   520→          <span className="flex items-center gap-2">
+   521→            <Button variant="outline" onClick={() => onOpenChange(false)}>
+   522→              Cancel
+   523→            </Button>
+   524→            <Button
+   525→              className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+   526→              onClick={() => void submit()}
+   527→              disabled={busy}
+   528→            >
+   529→              <Zap className="size-3.5" aria-hidden /> {editing ? "Save changes" : "Create rule"}
+   530→            </Button>
+   531→          </span>
+   532→        </DialogFooter>
+   533→      </DialogContent>
+   534→    </Dialog>
+   535→  );
+   536→}
+   537→
+   538→function triggerLabel(t: string) {
+   539→  return TRIGGERS.find((x) => x.value === t)?.label ?? t;
+   540→}
+   541→
+   542→function describeCondition(c: AutomationConditionDTO) {
+   543→  const field = CONDITION_FIELDS.find((f) => f.value === c.field)?.label ?? c.field;
+   544→  const op = OPERATORS.find((o) => o.value === c.operator)?.label ?? c.operator;
+   545→  return `${field} ${op} ${c.value || "…"}`;
+   546→}
+   547→
+   548→function describeAction(a: AutomationActionDTO) {
+   549→  const meta = ACTIONS.find((x) => x.value === a.type);
+   550→  const label = meta?.label ?? a.type;
+   551→  return a.value ? `${label}` : label;
+   552→}
+   553→
+   554→export function AutomationsView() {
+   555→  const role = usePortalStore((s) => s.role);
+   556→  const workspace = usePortalStore((s) => s.workspace);
+   557→  const [rules, setRules] = useState<AutomationRuleDTO[] | null>(null);
+   558→  const [dialogOpen, setDialogOpen] = useState(false);
+   559→  const [editing, setEditing] = useState<AutomationRuleDTO | null>(null);
+   560→
+   561→  const load = useCallback(async () => {
+   562→    try {
+   563→      const res = await api2.automations();
+   564→      setRules(res.rules);
+   565→    } catch {
+   566→      setRules([]);
+   567→    }
+   568→  }, []);
+   569→
+   570→  useEffect(() => {
+   571→    let alive = true;
+   572→    api2
+   573→      .automations()
+   574→      .then((res) => {
+   575→        if (alive) setRules(res.rules);
+   576→      })
+   577→      .catch(() => {
+   578→        if (alive) setRules([]);
+   579→      });
+   580→    return () => {
+   581→      alive = false;
+   582→    };
+   583→  }, []);
+   584→
+   585→  async function toggle(rule: AutomationRuleDTO, enabled: boolean) {
+   586→    try {
+   587→      await api2.patchAutomation(rule.id, { enabled });
+   588→      setRules((prev) => prev?.map((r) => (r.id === rule.id ? { ...r, enabled } : r)) ?? null);
+   589→      toast.success(enabled ? `Rule "${rule.name}" enabled` : `Rule "${rule.name}" paused`);
+   590→    } catch (err) {
+   591→      toast.error(err instanceof Error ? err.message : "Failed to update rule");
+   592→    }
+   593→  }
+   594→
+   595→  async function remove(rule: AutomationRuleDTO) {
+   596→    try {
+   597→      await api2.deleteAutomation(rule.id);
+   598→      setRules((prev) => prev?.filter((r) => r.id !== rule.id) ?? null);
+   599→      toast.success(`Deleted "${rule.name}"`);
+   600→    } catch (err) {
+   601→      toast.error(err instanceof Error ? err.message : "Failed to delete rule");
+   602→    }
+   603→  }
+   604→
+   605→  const canEdit = role === "ADMIN" || role === "MANAGER" || role === "MEMBER";
+   606→
+   607→  return (
+   608→    <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
+   609→      <div className="flex flex-wrap items-center gap-3">
+   610→        <div className="flex size-9 items-center justify-center rounded-lg bg-amber-600/10 text-amber-700">
+   611→          <Zap className="size-4.5" aria-hidden />
+   612→        </div>
+   613→        <div className="min-w-0 flex-1">
+   614→          <h1 className="text-lg font-semibold tracking-tight text-foreground">Automation</h1>
+   615→          <p className="text-xs text-muted-foreground">
+   616→            No-code rules that run on every event — triggers, conditions and actions.
+   617→          </p>
+   618→        </div>
+   619→        {canEdit && (
+   620→          <Button
+   621→            className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+   622→            onClick={() => {
+   623→              setEditing(null);
+   624→              setDialogOpen(true);
+   625→            }}
+   626→          >
+   627→            <Plus className="size-4" aria-hidden /> New rule
+   628→          </Button>
+   629→        )}
+   630→      </div>
+   631→
+   632→      {rules === null ? (
+   633→        <div className="space-y-3">
+   634→          {Array.from({ length: 2 }).map((_, i) => (
+   635→            <Skeleton key={i} className="h-32 w-full rounded-lg" />
+   636→          ))}
+   637→        </div>
+   638→      ) : rules.length === 0 ? (
+   639→        <EmptyState
+   640→          icon={Zap}
+   641→          title="No automation rules yet"
+   642→          hint='Create one like: "When status changes → if type = Bug → add label security".'
+   643→          action={
+   644→            canEdit ? (
+   645→              <Button
+   646→                size="sm"
+   647→                className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+   648→                onClick={() => {
+   649→                  setEditing(null);
+   650→                  setDialogOpen(true);
+   651→                }}
+   652→              >
+   653→                <Plus className="size-3.5" aria-hidden /> Create your first rule
+   654→              </Button>
+   655→            ) : undefined
+   656→          }
+   657→        />
+   658→      ) : (
+   659→        <div className="space-y-3">
+   660→          {rules.map((rule) => (
+   661→            <div
+   662→              key={rule.id}
+   663→              className={cn(
+   664→                "rounded-lg border border-border bg-card p-4 transition-opacity",
+   665→                !rule.enabled && "opacity-60"
+   666→              )}
+   667→            >
+   668→              <div className="flex flex-wrap items-center gap-3">
+   669→                <div
+   670→                  className={cn(
+   671→                    "flex size-8 shrink-0 items-center justify-center rounded-md",
+   672→                    rule.enabled ? "bg-amber-600/10 text-amber-700" : "bg-muted text-muted-foreground"
+   673→                  )}
+   674→                >
+   675→                  <Zap className="size-4" aria-hidden />
+   676→                </div>
+   677→                <div className="min-w-0 flex-1">
+   678→                  <div className="flex items-center gap-2">
+   679→                    <span className="truncate text-sm font-semibold text-foreground">{rule.name}</span>
+   680→                    {!rule.enabled && (
+   681→                      <span className="flex items-center gap-1 rounded bg-muted px-1.5 py-px text-[10px] font-semibold uppercase text-muted-foreground">
+   682→                        <CircleSlash className="size-3" aria-hidden /> Paused
+   683→                      </span>
+   684→                    )}
+   685→                  </div>
+   686→                  <div className="mt-0.5 text-xs text-muted-foreground">
+   687→                    {rule.runCount} run{rule.runCount === 1 ? "" : "s"}
+   688→                    {rule.lastRunAt
+   689→                      ? ` · last ${formatDistanceToNow(new Date(rule.lastRunAt), { addSuffix: true })}`
+   690→                      : " · never run"}
+   691→                    {rule.lastRunResult ? ` · ${rule.lastRunResult}` : ""}
+   692→                  </div>
+   693→                </div>
+   694→                <Avatar name={rule.creator.name} color={rule.creator.avatarColor} size="xs" />
+   695→                <Switch checked={rule.enabled} onCheckedChange={(v) => void toggle(rule, v)} aria-label={`Toggle ${rule.name}`} />
+   696→                {canEdit && (
+   697→                  <>
+   698→                    <Button
+   699→                      variant="outline"
+   700→                      size="sm"
+   701→                      onClick={() => {
+   702→                        setEditing(rule);
+   703→                        setDialogOpen(true);
+   704→                      }}
+   705→                    >
+   706→                      Edit
+   707→                    </Button>
+   708→                    <Button
+   709→                      variant="ghost"
+   710→                      size="icon"
+   711→                      className="size-8 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600"
+   712→                      aria-label={`Delete ${rule.name}`}
+   713→                      onClick={() => void remove(rule)}
+   714→                    >
+   715→                      <Trash2 className="size-3.5" aria-hidden />
+   716→                    </Button>
+   717→                  </>
+   718→                )}
+   719→              </div>
+   720→
+   721→              {/* Rule pipeline */}
+   722→              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+   723→                <span className="rounded bg-amber-600/10 px-2 py-1 font-medium text-amber-600">
+   724→                  WHEN {triggerLabel(rule.trigger)}
+   725→                </span>
+   726→                {rule.conditions.length > 0 && (
+   727→                  <>
+   728→                    <ArrowRight className="size-3 text-muted-foreground/50" aria-hidden />
+   729→                    <span className="rounded bg-violet-500/10 px-2 py-1 font-medium text-violet-500 dark:text-violet-300">
+   730→                      IF {rule.conditions.map(describeCondition).join(" AND ")}
+   731→                    </span>
+   732→                  </>
+   733→                )}
+   734→                <ArrowRight className="size-3 text-muted-foreground/50" aria-hidden />
+   735→                <span className="rounded bg-emerald-500/10 px-2 py-1 font-medium text-emerald-500 dark:text-emerald-300">
+   736→                  THEN {rule.actions.map(describeAction).join(", ")}
+   737→                </span>
+   738→              </div>
+   739→            </div>
+   740→          ))}
+   741→          <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-[11px] text-muted-foreground">
+   742→            <History className="size-3.5 shrink-0" aria-hidden />
+   743→            Rules run server-side on every matching event. Action effects appear in each issue&apos;s activity feed.
+   744→            {workspace ? " Members are notified instantly." : ""}
+   745→          </div>
+   746→        </div>
+   747→      )}
+   748→
+   749→      <RuleDialog
+   750→        open={dialogOpen}
+   751→        onOpenChange={setDialogOpen}
+   752→        editing={editing}
+   753→        onSaved={() => void load()}
+   754→      />
+   755→    </div>
+   756→  );
+   757→}
+   758→

@@ -8,6 +8,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import {
+  Download,
   FileArchive,
   FileCode2,
   FileSpreadsheet,
@@ -15,6 +16,7 @@ import {
   File as FileIcon,
   Image as ImageIcon,
   Loader2,
+  Maximize2,
   Paperclip,
   Trash2,
   UploadCloud,
@@ -24,6 +26,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import type { AttachmentDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { RelativeTime } from "./RelativeTime";
 
 interface Props {
@@ -84,6 +88,7 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState<{ name: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [preview, setPreview] = useState<AttachmentDTO | null>(null);
 
   const upload = useCallback(
     async (files: FileList | File[]) => {
@@ -196,12 +201,23 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
                 className="group flex items-center gap-2.5 rounded-lg border border-border/70 bg-card px-2 py-1.5 transition-colors hover:border-amber-400/50 hover:bg-muted/60"
               >
                 {kind === "image" ? (
-                  <img
-                    src={api.attachmentUrl(att.id)}
-                    alt={att.originalName}
-                    className="h-8 w-8 shrink-0 rounded-md border border-border object-cover"
-                    loading="lazy"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setPreview(att)}
+                    title={`Preview ${att.originalName}`}
+                    aria-label={`Preview image ${att.originalName}`}
+                    className="group/thumb relative shrink-0 rounded-md"
+                  >
+                    <img
+                      src={api.attachmentUrl(att.id)}
+                      alt={att.originalName}
+                      className="h-8 w-8 rounded-md border border-border object-cover transition-transform group-hover/thumb:scale-110"
+                      loading="lazy"
+                    />
+                    <span className="absolute inset-0 flex items-center justify-center rounded-md bg-black/45 opacity-0 transition-opacity group-hover/thumb:opacity-100">
+                      <Maximize2 className="size-3 text-white" aria-hidden />
+                    </span>
+                  </button>
                 ) : (
                   <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", tileClass(kind))}>
                     <KindIcon att={att} className="h-4 w-4" />
@@ -209,13 +225,24 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
                 )}
 
                 <div className="min-w-0 flex-1">
-                  <a
-                    href={api.attachmentUrl(att.id, true)}
-                    className="block max-w-full truncate text-xs font-medium text-foreground hover:text-amber-700 hover:underline dark:hover:text-amber-400"
-                    title={att.originalName}
-                  >
-                    {att.originalName}
-                  </a>
+                  {kind === "image" ? (
+                    <button
+                      type="button"
+                      onClick={() => setPreview(att)}
+                      className="block max-w-full truncate text-xs font-medium text-foreground hover:text-amber-700 hover:underline dark:hover:text-amber-400"
+                      title={att.originalName}
+                    >
+                      {att.originalName}
+                    </button>
+                  ) : (
+                    <a
+                      href={api.attachmentUrl(att.id, true)}
+                      className="block max-w-full truncate text-xs font-medium text-foreground hover:text-amber-700 hover:underline dark:hover:text-amber-400"
+                      title={att.originalName}
+                    >
+                      {att.originalName}
+                    </a>
+                  )}
                   <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground/80">
                     <span>{formatSize(att.size)}</span>
                     <span aria-hidden>·</span>
@@ -252,6 +279,52 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
           })}
         </ul>
       )}
+
+      {/* Image lightbox */}
+      <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 pr-6">
+              <ImageIcon className="size-4 shrink-0 text-sky-600 dark:text-sky-400" aria-hidden />
+              <span className="truncate">{preview?.originalName}</span>
+            </DialogTitle>
+            <DialogDescription>
+              {preview && (
+                <>
+                  {formatSize(preview.size)} · {preview.mimeType} · uploaded by{" "}
+                  {preview.uploader.name} <RelativeTime date={preview.createdAt} />
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {preview && (
+            <div className="overflow-hidden rounded-lg border bg-muted/40 p-1">
+              {/* muted backdrop so transparent PNGs stay visible */}
+              <img
+                src={api.attachmentUrl(preview.id)}
+                alt={preview.originalName}
+                className="mx-auto max-h-[60vh] w-auto max-w-full rounded-md object-contain"
+              />
+            </div>
+          )}
+          {preview && (
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPreview(null)}>
+                Close
+              </Button>
+              <Button asChild size="sm" className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700">
+                <a
+                  href={api.attachmentUrl(preview.id, true)}
+                  download={preview.originalName}
+                  aria-label={`Download ${preview.originalName}`}
+                >
+                  <Download className="size-3.5" aria-hidden /> Download
+                </a>
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

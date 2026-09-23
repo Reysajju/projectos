@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ArrowDownWideNarrow,
   BookmarkPlus,
   CircleAlert,
   Command,
@@ -38,9 +39,11 @@ import type { IssueDTO } from "@/lib/portal-types";
 const EXAMPLES = [
   'status = "In Progress"',
   "assignee = me AND status != Done",
-  'project = WEB AND priority = "Highest"',
-  "due = overdue",
-  "points > 0 AND sprint = active", // shows parser error styling too
+  'status IN ("To Do", "In Progress")',
+  "project IN (WEB, APP) AND status != Done",
+  'priority IN ("Highest", "High") ORDER BY points DESC',
+  "due = overdue ORDER BY due ASC",
+  "assignee NOT IN (none) AND sprint = active",
   "label = security",
   "link = blocks AND status != Done",
 ];
@@ -60,6 +63,9 @@ const FIELD_HINTS: [string, string][] = [
   ["linked", "= WEB-9 · != WEB-9"],
 ];
 
+const SORTABLE_HINT =
+  "priority · status · type · project · sprint · assignee · reporter · summary · points · due · created · updated · cf.<Name>";
+
 export function AdvancedSearchView() {
   const workspace = usePortalStore((s) => s.workspace);
   const me = usePortalStore((s) => s.me);
@@ -70,6 +76,7 @@ export function AdvancedSearchView() {
   const [query, setQuery] = useState("");
   const [issues, setIssues] = useState<IssueDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ by: string; dir: "asc" | "desc" } | null>(null);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<SavedFilterDTO[] | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -86,9 +93,11 @@ export function AdvancedSearchView() {
       const res = await api2.advancedSearch(trimmed);
       setIssues(res.issues);
       setError(res.error);
+      setSort(res.sortedBy ? { by: res.sortedBy, dir: res.sortedDir ?? "asc" } : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
       setIssues([]);
+      setSort(null);
     } finally {
       setLoading(false);
     }
@@ -270,9 +279,23 @@ export function AdvancedSearchView() {
 
       {/* Results */}
       <section aria-label="Search results" className="space-y-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Results{issues ? ` · ${issues.length}` : ""}
-        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Results{issues ? ` · ${issues.length}` : ""}
+          </h2>
+          {sort && !error && (
+            <span
+              title={`Results are ordered by ${sort.by} ${sort.dir === "asc" ? "ascending" : "descending"}`}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400"
+            >
+              <ArrowDownWideNarrow
+                className={cn("size-3", sort.dir === "asc" && "scale-y-[-1]")}
+                aria-hidden
+              />
+              {sort.by} · {sort.dir}
+            </span>
+          )}
+        </div>
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -357,16 +380,40 @@ export function AdvancedSearchView() {
               Combine clauses with <code className="font-mono">AND</code> /{" "}
               <code className="font-mono">OR</code> and parentheses. Operators:{" "}
               <code className="font-mono">=</code>, <code className="font-mono">!=</code>,{" "}
-              <code className="font-mono">~</code> (contains). <code className="font-mono">me</code> means you.
+              <code className="font-mono">~</code> (contains),{" "}
+              <code className="font-mono">IN</code>, <code className="font-mono">NOT IN</code>.{" "}
+              <code className="font-mono">me</code> means you.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
-            {FIELD_HINTS.map(([f, hint]) => (
-              <div key={f} className="flex items-baseline justify-between gap-3 rounded-md bg-muted/40 px-2.5 py-1.5">
-                <code className="font-mono text-xs font-semibold text-foreground">{f}</code>
-                <span className="font-mono text-[11px] text-muted-foreground">{hint}</span>
+          <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+            <div className="space-y-1.5">
+              {FIELD_HINTS.map(([f, hint]) => (
+                <div key={f} className="flex items-baseline justify-between gap-3 rounded-md bg-muted/40 px-2.5 py-1.5">
+                  <code className="font-mono text-xs font-semibold text-foreground">{f}</code>
+                  <span className="font-mono text-[11px] text-muted-foreground">{hint}</span>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.06] p-2.5">
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                <Command className="size-3" aria-hidden /> Lists &amp; sorting
               </div>
-            ))}
+              <ul className="space-y-1 font-mono text-[11px] text-muted-foreground">
+                <li>
+                  <code className="text-foreground">status IN ("To Do", "In Progress")</code> — any of
+                </li>
+                <li>
+                  <code className="text-foreground">assignee NOT IN (none)</code> — excludes
+                </li>
+                <li>
+                  <code className="text-foreground">ORDER BY due ASC</code> ·{" "}
+                  <code className="text-foreground">ORDER BY points DESC</code>
+                </li>
+              </ul>
+              <p className="mt-1.5 text-[10.5px] leading-relaxed text-muted-foreground/80">
+                Sortable fields: <span className="font-mono">{SORTABLE_HINT}</span>
+              </p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

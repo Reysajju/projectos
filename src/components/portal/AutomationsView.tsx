@@ -153,6 +153,7 @@ function RuleDialog({
   const [actions, setActions] = useState<AutomationActionDTO[]>([{ type: "notify_assignee" }]);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testProject, setTestProject] = useState("all");
   const [testResult, setTestResult] = useState<
     | {
         scanned: number;
@@ -171,6 +172,8 @@ function RuleDialog({
 
   useEffect(() => {
     if (!open) return;
+    setTestProject("all");
+    setTestResult(null);
     if (editing) {
       setName(editing.name);
       setTrigger(editing.trigger);
@@ -212,12 +215,14 @@ function RuleDialog({
     }
   }
 
-  async function runTest() {
+  async function runTest(scopeOverride?: string) {
+    const scope = scopeOverride ?? testProject;
     setTesting(true);
     try {
       const res = await api2.testAutomation({
         conditions: conditions.filter((c) => c.value || conditionFieldKind(c.field) === "free"),
         actions: actions.map((a) => ({ type: a.type, value: a.value || undefined })),
+        projectId: scope === "all" ? null : scope,
       });
       setTestResult(res);
     } catch (err) {
@@ -456,7 +461,8 @@ function RuleDialog({
             ) : testResult ? (
               testResult.matchCount === 0 ? (
                 <p className="py-1 text-xs text-muted-foreground">
-                  No issues out of the last {testResult.scanned} updated would match these conditions.
+                  No issues out of the last {testResult.scanned} updated
+                  {testProject === "all" ? "" : " in this project"} would match these conditions.
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -502,21 +508,31 @@ function RuleDialog({
         )}
 
         <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            className="gap-1.5"
-            onClick={() => void runTest()}
-            disabled={testing || busy}
-            title="Preview which recent issues this rule would match — nothing is changed"
-          >
-            {testing ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-            ) : (
-              <FlaskConical className="size-3.5" aria-hidden />
-            )}
-            Test run
-          </Button>
+          <div className="flex items-center gap-2">
+            <TestScopeSelect
+              value={testProject}
+              onValueChange={(v) => {
+                setTestProject(v);
+                setTestResult(null);
+                if (v !== "all") void runTest(v);
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => void runTest()}
+              disabled={testing || busy}
+              title="Preview which recent issues this rule would match — nothing is changed"
+            >
+              {testing ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              ) : (
+                <FlaskConical className="size-3.5" aria-hidden />
+              )}
+              Test run
+            </Button>
+          </div>
           <span className="flex items-center gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
@@ -753,5 +769,38 @@ export function AutomationsView() {
         onSaved={() => void load()}
       />
     </div>
+  );
+}
+
+// ─── Test-run scope selector ─────────────────────────────────────
+
+function TestScopeSelect({
+  value,
+  onValueChange,
+}: {
+  value: string;
+  onValueChange: (v: string) => void;
+}) {
+  const projects = usePortalStore((s) => s.workspace?.projects ?? []);
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger
+        className="h-9 w-40 shrink-0 text-xs"
+        aria-label="Test-run project scope"
+        title="Limit the dry run to one project"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all" className="text-xs">
+          All projects
+        </SelectItem>
+        {projects.map((p) => (
+          <SelectItem key={p.id} value={p.id} className="text-xs">
+            {p.key} · {p.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

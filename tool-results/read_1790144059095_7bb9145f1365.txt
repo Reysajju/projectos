@@ -369,4 +369,231 @@
    369→- Remaining from blueprint: email digests/transactional email (§34), API keys for programmatic access (§38 second half), mentions-in-editor rich input, dashboard widget customization, board column manager merging WIP + status ordering, Issue Links (§16, issue_links table).
    370→- Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); external webhook URLs fail in sandbox by design (logged FAILED); receiver ring buffer is in-memory (resets on restart).
    371→- Recommended next: Issue Links (§16 blocks/blocks-by on issue panel), API keys + "personal access tokens" UI, email digest preview page, dashboard widget toggles persisted per user.
-   372→
+   372→---
+   373→Task ID: 13 (round 5, part A)
+   374→Agent: coordinator
+   375→Task: QA assessment + Issue Links (§16) end-to-end
+   376→
+   377→Work Log:
+   378→- Baseline QA: server 200, lint clean, dashboard/board/panel render, 0 console errors, sprint data verified correct (WEB Sprint 2 genuinely has 0 DONE issues — not a bug).
+   379→- Issue Links (§16) FULL STACK:
+   380→  - Schema: IssueLink (orgId, type BLOCKS|DUPLICATES|RELATES|CAUSES, sourceId→targetId, createdById) with @@unique([sourceId,targetId,type]) + indexes; db:pushed.
+   381→  - API: POST /api/issues/[id]/links {type,targetKey} (validates key format, org-scope, self-link 400, both-direction dup 409; Activity rows on BOTH issues, notification to target assignee, webhook issue.updated link.added); DELETE /api/links/[id] (org-scoped, activity + webhook link.removed); issue detail GET now returns links[] (direction-aware DTO with other-issue summary/status/type/priority).
+   382→  - JQL: link = blocks|duplicates|relates|causes|none|any (aliases incl. != ) and linked = <KEY> (either direction).
+   383→  - UI: LinksSection.tsx — type-chip composer w/ debounced live search picker (/api/search, self excluded), verb-phrased rows (blocks / is blocked by / causes / is caused by / duplicates / relates to), status dot, strikethrough on DONE, click-through nav, hover delete, empty state, amber "Blocked by WEB-11" warning banner for inward blocks from non-done issues.
+   384→  - IssueDTO.linkCount + 🔗 badge on board cards; demo links seeded (live DB corrected to live numbering; seed.ts has its own consistent set).
+   385→- ApiError arg order fixed in new routes (message, status). tsc clean (excluding pre-existing seed/examples quirks).
+   386→
+   387→Verification:
+   388→- curl: 201 create, 409 dup, 400 self, 404 bad key, 400 bad type, 200 delete; detail payload direction correct.
+   389→- JQL: link = blocks → WEB-9/10/8/7; linked = WEB-9 → WEB-5/9/7; link = none → 31; link != blocks AND link != none correct.
+   390→- Browser: WEB-9 shows "is blocked by WEB-11" + amber Blocked banner; composer type chips + live search ("scaffolding" → WEB-14) → click → toast "WEB-9 blocks WEB-14" + row appears; WEB-14 shows inward "is blocked by WEB-9"; delete via row hover works; link rows/counts update.
+   391→
+   392→Stage Summary:
+   393→- §16 Issue Links SHIPPED. Remaining blueprint gaps: API keys/PATs (§38 second half), email digests (§34), mentions-in-editor, dashboard widget customization, board column manager.
+   394→- Recommended next: API keys + PAT UI, then dashboard widget toggles.
+   395→---
+   396→Task ID: 13 (round 5, part B)
+   397→Agent: coordinator
+   398→Task: API Keys + Bearer auth (§38 second half) end-to-end
+   399→
+   400→Work Log:
+   401→- Schema: ApiKey (orgId, name, prefix display, keyHash UNIQUE sha256, scopes JSON, creator, lastUsedAt, revokedAt) + relations; db:pushed.
+   402→- Auth: getSession() now accepts `Authorization: Bearer posk_…` FIRST (before cookie). keyHash lookup; revoked → null; lastUsedAt stamped max once/min; scope→effective role: read→VIEWER, write→MEMBER. Every /api route inherits bearer auth automatically; ADMIN/MANAGER endpoints stay token-proof (keys/webhooks/workflow check canManage on the derived role).
+   403→- API: GET/POST /api/keys (ADMIN/MANAGER; token returned ONCE), DELETE /api/keys/[id] = revoke (prefix kept for audit).
+   404→- UI: ApiKeysView + sidebar "API Keys" (manageOnly) + TopBar title. Explainer panel w/ copy-able curl example; create dialog (name + write-scope switch); one-time token dialog w/ copy + "I've stored it safely"; key cards w/ Active/Revoked badges, scope chips, prefix mono, last-used relative time, revoke confirm.
+   405→- Seed: 2 demo keys (active CI pipeline, revoked Monitoring scripts).
+   406→- RelativeTime gained optional prefix prop.
+   407→
+   408→Verification (curl + browser):
+   409→- Bearer workspace 200; create issue 201 (WEB-20) + PATCH 200 with write key; read-only key create → 403 "Viewers cannot make changes"; bogus token 401; keys list via token → 403; revoke 200 then hash lookup fails.
+   410→- Browser: created "Grafana dashboard widget" key through the dialog (name → write toggle → Generate → one-time token dialog w/ copy) — all rendered correctly; revoked + active cards show correct badges/dimming; lastUsedAt ticking.
+   411→- Dev-server hiccup: port 3000 died after Prisma client regen (db:push); restarted `bun run dev` detached — healthy again.
+   412→
+   413→Stage Summary:
+   414→- §38 API keys SHIPPED (schema → auth → routes → UI → seed). Demo keys renamed to realistic names (CI pipeline / Monitoring scripts / Grafana dashboard widget).
+   415→- Remaining: dashboard widget customization, email digests, mentions-in-editor, board column manager.
+   416→- Next: per-user dashboard widget toggles + ordering persisted via UserPreference.
+   417→---
+   418→Task ID: 13 (round 5, part C — final)
+   419→Agent: coordinator
+   420→Task: Dashboard widget customization (§6) + styling/qa polish pass
+   421→
+   422→Work Log:
+   423→- Per-user preferences store: UserPreference (userId, key UNIQUE-together, JSON value) + GET/PATCH /api/preferences (upsert, 10KB cap) + api.getPreferences/setPreference.
+   424→- Dashboard widget customization: Customize popover (SlidersHorizontal) — per-widget visibility Switch + up/down reorder over a registry of the 5 widgets (my-issues, active-sprints, created-vs-resolved, upcoming-due, activity). Prefs persisted under key "dashboard.widgets" {order, hidden}; unknown/missing widget ids self-heal (registry growth safe); grid uses [grid-auto-flow:dense] so gaps fill naturally. KPI row always visible.
+   425→- Styling/QA polish:
+   426→  - Fixed invalid Tailwind classes across 3 files: rose-500/100/10 → rose-500/10, amber-500/100/10 → amber-500/10, muted/50/50 → muted/50 (IssuePanel, AdvancedSearchView, AutomationsView).
+   427→  - Dark mode: dashboard + reports charts were unreadable (hardcoded #e7e5e4 grid/#78716c ticks/light tooltip). Both now theme-aware via useTheme (grid #44403c, ticks #a8a29e, tooltip bg/border dark variants, velocity committed bar #44403c, cursor #292524).
+   428→  - Dark: activity divider divide-stone-100 → dark:divide-stone-800 added.
+   429→  - Board due-date chip: whitespace-nowrap (was wrapping on badge-dense cards).
+   430→  - A11y: IssuePanel Sheet now always has a title (sr-only "Issue details" in loading/empty branches) + aria-describedby={undefined} → Radix DialogTitle/Description console warnings eliminated (verified 0 occurrences after open/close).
+   431→  - JQL help: FIELD_HINTS + EXAMPLES gained link/linked rows so §16 search is discoverable.
+   432→- Dev-env: dev server died after Prisma client regen mid-round; restarted detached, stable since.
+   433→
+   434→Verification:
+   435→- Customize flow: toggle "Active sprints" off + reorder (My issues down) → GET /api/preferences shows persisted {order:[active-sprints,my-issues,…], hidden:[active-sprints]} → hard reload applies layout (Active sprints card gone) → reset to defaults via API for clean demo state.
+   436→- Mobile 390px: 390=390 no overflow, hamburger nav, single-column widgets.
+   437→- Dark mode: dashboard, reports (burndown/velocity gridlines+ticks readable), issue panel links rows + blocked banner — all clean.
+   438→- lint + tsc clean; GET / 200; a11y warnings 0.
+   439→
+   440→Stage Summary:
+   441→- Round 5 shipped: §16 Issue Links (full stack incl. JQL + blocked-banner UX), §38 API Keys/Bearer auth (full stack + explainer + one-time token UX), §6 dashboard widget customization (server-persisted), plus a real styling/QA pass (invalid classes, dark-mode charts, a11y, mobile).
+   442→- Remaining blueprint gaps: email digests/transactional email (§34), mentions-in-editor rich input, board column manager (merge WIP + status ordering), custom field inline editing on tables.
+   443→- Known minor: pre-existing seed.ts userId2 tsc quirk (out of app scope); dev-tools overlay can intercept clicks in preview (dev-only).
+   444→- Recommended next: email digest preview page + cron, board column manager, mentions-in-editor.
+   445→---
+   446→Task ID: 14 (round 6)
+   447→Agent: coordinator
+   448→Task: QA assessment (agent-browser) + bug fixes + @mentions autocomplete + board column manager + styling polish
+   449→
+   450→Work Log:
+   451→- Baseline QA (all green): lint clean, GET / 200, login OK, API smoke (workspace/filters/keys/webhooks/workflow/dashboard/search/reports 200; burndown correctly 400s without sprintId), browser sweep of Dashboard/Board/Roadmap/Issues/Reports/Automation/Workflow/Search palette/Issue panel — 0 console errors, 0 page errors.
+   452→- QA false alarm resolved: issue-panel Sheet scrollHeight anomaly (1134>800) was caused by my own programmatic scrollBy on an overflow-hidden container; pristine state measures 800=800 and wheel/keyboard scrolling works via the inner scroller. No fix needed.
+   453→- Fix 1 — Workflow transition list showed CATEGORY labels ("To do → To do" for Backlog→To Do). Now shows "within <category>" when from/to share a category, and "A → B" categories only when they differ.
+   454→- Fix 2 — Activity feed showed raw "changed BLOCKS" for link events. Now: issue.linked → "linked · blocks WEB-14"; issue.link_removed → "removed link · WEB-14"; Link2 icon added for both.
+   455→- Feature 1 — @mentions autocomplete in comment editor (MentionTextarea): typing "@" (after whitespace/start) opens a member picker above the caret (avatar, name, title); live filter by name/title; ↑↓ navigate, Enter/Tab select, Esc dismiss, hover select; inserts "@Full Name " with caret restored; blur-safe via delayed close. Full stack verified end-to-end: posting "hey @Tom Okafor" produced a 'mentioned' notification for tom@acme.dev.
+   456→- Feature 2 — Board column manager ("Columns" button on board FilterBar, visible to all roles): per-status visibility Switch + up/down reorder in a popover; guarded against hiding the last visible column; persisted per-user via GET/PATCH /api/preferences under key "board.columns" {order, hidden}; self-heals when new statuses are added; Reset restores defaults. Board renders visible statuses only, hidden columns' issues are simply not shown (personal view); DnD/workflow guards unaffected.
+   457→- Feature 3 — Cmd/Ctrl+Enter submits the comment from the mention-aware textarea (works whether or not the mention popup is open).
+   458→- Styling details: Columns button matches WIP-limits button style; mention popup styled as dark-mode-aware card with amber active row + keyboard hint footer; strikethrough+dim for hidden columns in manager; "x/y visible" counter.
+   459→
+   460→Verification (curl + agent-browser):
+   461→- Columns: hide "To Do" → GET /api/preferences shows {hidden:[…]} → hard reload keeps column hidden; move "Done" up ×2 → order persisted; Reset → defaults restored. Dark mode + 390px mobile clean (0 horizontal overflow).
+   462→- Mentions: "@" → popup lists 5 members; type "tom" filters; ArrowDown+Enter inserts "hey @Tom Okafor "; textarea stays focused; Tom received the mention notification.
+   463→- Activity: WEB-9 now reads "linked · blocks WEB-14" / "removed link · WEB-8".
+   464→- Workflow: transitions list reads "within To do" / "To do → In progress".
+   465→- Cmd/Ctrl+Enter: comment "cmd+enter test" posted from keyboard alone.
+   466→- lint clean; tsc clean for app code (pre-existing skills/seed quirks only); console errors 0 after fresh load + palette + popover interactions.
+   467→
+   468→Stage Summary:
+   469→- Round 6 shipped: 2 UX/copy fixes (workflow transition labels, link activity humanization) + 2 new features (@mentions autocomplete, per-user board column manager) + comment ⌘⏎ submit — all browser-verified in light/dark/mobile.
+   470→- Remaining blueprint gaps: email digests/transactional email (§34), board column drag-reorder (currently buttons), custom-field inline editing on Issues table, roadmap dependency arrows, sprint auto-planning.
+   471→- Known minor: pre-existing seed.ts/skills tsc quirks (out of app scope); dev-tools overlay can intercept preview clicks (dev-only).
+   472→- Recommended next: email digest preview + weekly cron, board column drag-reorder via dnd-kit, Issues-table custom-field columns.
+   473→---
+   474→Task ID: 15 (round 7)
+   475→Agent: coordinator
+   476→Task: QA assessment (agent-browser) → feature work: Roadmap dependency arrows (§16×§8), Email digest (§34) with scheduled sender, Issues-table inline editing
+   477→
+   478→Work Log:
+   479→STATUS ASSESSMENT
+   480→- Server healthy, lint/tsc clean, browser sweep (dashboard/board/roadmap/issues) passed with 0 console errors → phase stable → chose FEATURE WORK on the three largest remaining blueprint gaps.
+   481→
+   482→FEATURE 1 — ROADMAP DEPENDENCY ARROWS (§16 × §8)
+   483→- API: project detail GET now returns `links: IssueEdgeDTO[]` (IssueLink rows where BOTH endpoints are in the project; select id/sourceId/targetId/type).
+   484→- RoadmapView: shared `barGeom()` helper guarantees rendered bars and the SVG layout stay 1:1; `DependencyArrows` overlay draws finish-to-start bezier arrows (source bar right edge → target bar left edge) color-coded by type (BLOCKS amber, CAUSES rose, DUPLICATES violet, RELATES stone) with card-colored halo underlay for legibility over bars, arrowhead markers per type, native <title> tooltip ("WEB-7 causes WEB-11"), hover thickens stroke.
+   485→- Backward (negative-gap) edges render as clean S-curves — visually exposes schedule conflicts (e.g. WEB-9 due Sep 25 blocked by WEB-11 due Sep 26).
+   486→- Toolbar "Links" toggle (aria-pressed, amber active) + "→ Dependency" legend chip; arrows hidden during drag (geometry is committed-data based).
+   487→- Unscheduled-epic rows now fixed-height (ROW_H) with border — consistent row rhythm required for the SVG layout.
+   488→
+   489→FEATURE 2 — ROADMAP "STORIES" SCOPE + StoryRow
+   490→- Root cause discovered while testing arrows: linked issues (WEB-9/11/7…) are STORIES — invisible on the epics-only roadmap, so arrows had no visible endpoints. Added "Stories" scope toggle (default ON) that plots scheduled standalone issues (non-epic, no parent, has startDate/dueDate) after the epics under a sticky "Scheduled issues · N" divider row.
+   491→- StoryRow: type icon + key + summary (done = strikethrough), project-color bar w/ min 2-day width, story-points chip, red overdue dot (due < today, not done); geometry via barGeom(startFallback=dueDate).
+   492→- Arrow endpoints resolve across epic rows, expanded child rows, and story rows; edges to collapsed/unscheduled rows are skipped. Verified: WEB-7→causes→WEB-11, WEB-11→blocks→WEB-9 drawn with correct coordinates; toggles work both ways.
+   493→
+   494→FEATURE 3 — EMAIL DIGEST (§34) FULL STACK
+   495→- Schema: EmailLog (orgId, userId, kind DAILY_DIGEST|WEEKLY_DIGEST, toEmail, subject, body, status SIMULATED|SENT|FAILED, meta JSON) + indexes; db:pushed. Relations added on Organization + User.
+   496→- Engine (src/lib/digest.ts): buildDigest(orgId, userId, kind) — 5 sections (Overdue, Blocked-by-unfinished, Due next 7 days, Open assigned, Completed since period) + counts + subject ("[ProjectOS] Daily digest — 7 due soon · 6 completed"); renderDigestText() plain-text body; sendEmail() outbox writer (sandbox = SIMULATED; swap point for real SMTP).
+   497→- API: GET /api/digest?kind= (preview), POST /api/digest (self-send always; userIds/all require ADMIN+MANAGER), POST /api/digest/cron (x-cron-secret header === DIGEST_CRON_SECRET in .env; iterates ALL orgs × members; notes Mondays for weekly), GET /api/emails (manageOnly, last 50 outbox rows).
+   498→- UI: DigestView + sidebar "Digest" (all roles, Mail icon) + TopBar "Email Digest". Email-client preview (From ProjectOS <digest@projectos.app> / To me / Subject) + mono plain-text body in scrollable card; Daily/Weekly segmented toggle; "Send me a test digest" + manageOnly "Send to everyone"; schedule card with "Next run: tomorrow 09:00 (Asia/Karachi)" chip; manageOnly Outbox table (subject, recipient, kind, trigger, status pill, relative time).
+   499→- Cron mini-service: mini-services/digest-cron (own package.json, `bun --hot index.ts`, port 3210 health endpoint) — fires POST /api/digest/cron daily at 09:00 Asia/Karachi (TZ math w/ UTC+5, self-rescheduling loop, boot catch-up if past 09:00). Started detached; boot catch-up delivered 5 digests (200 ok). Root tsconfig excludes mini-services (Bun globals).
+   500→- Typecheck fix: DigestView role from usePortalStore(s => s.role) (UserDTO has no role).
+   501→
+   502→FEATURE 4 — ISSUES TABLE INLINE EDITING
+   503→- PointsCell: click pts → inline number input (Enter/blur commit, Esc cancel; 0–999 validation; empty clears) → PATCH storyPoints; amber hover affordance.
+   504→- SprintCell: dashed-border Select (Backlog + project sprints) → PATCH sprintId with toast.
+   505→- CustomCell: typed inline editors per custom field — TEXT (input), NUMBER (validated), DATE (native date input → ISO, matches panel format), SELECT (options + None), CHECKBOX (Yes/No pill toggle). API replaces whole customFields map → client-side merge before PATCH; portal-types IssuePatchBody.customFields widened to Record<string, string | null>.
+   506→- VIEWERs get read-only cells (API enforces canWrite anyway). formatCustom moved to module scope. Discoverability tip added next to Export CSV ("click estimate, sprint or custom cells to edit inline").
+   507→
+   508→QA / VERIFICATION
+   509→- API: project detail links[] correct (6 WEB edges); digest preview/send 200; cron endpoint 401 w/o secret, 200 with (5 emails); customFields PATCH 200 + revert 200.
+   510→- Browser (agent-browser): roadmap arrows drawn w/ correct endpoints + conflict S-curves; Links/Stories toggles verified; digest preview daily/weekly switch, test send → toast + outbox row (6 recorded); sprint select WEB-1 → Sprint 2 → Backlog; pts 13 → cleared; Environment=Staging, GA window=Oct 15, Release build=v2.4.1 all committed then reverted via API; dark mode clean on roadmap (arrows legible over bars), digest, table; mobile 390px = 0 horizontal overflow (digest single column, hamburger nav); 0 runtime console errors (only Fast Refresh warnings from my edits); lint + tsc clean.
+   511→- Dev-env: dev server died again after db:push Prisma regen (known); restarted detached, stable since. Test-data contamination root-caused to an open IssuePanel sheet intercepting focus — not an app bug.
+   512→
+   513→Stage Summary:
+   514→- Round 7 shipped: §16×§8 roadmap dependency arrows (+ Stories scope), §34 email digest end-to-end (engine → outbox → UI → real scheduled mini-service), and Issues-table inline editing (pts/sprint/custom fields). Sidebar now: Dashboard, Projects, Search, Automation, Digest, Webhooks (manageOnly), API Keys (manageOnly), Workflow (manageOnly), Team, Settings.
+   515→- Remaining blueprint gaps: board column drag-reorder (buttons exist), mentions→email notifications linking, sprint auto-planning, dashboard widget drag (up/down buttons exist).
+   516→- Known minor: Escape inside Select-in-Dialog closes both (shadcn default); Release-build test artifact was overlay focus, no fix needed; digest outbox grows unbounded (50 shown — consider pruning like webhook deliveries).
+   517→- Recommended next: board column drag-reorder via dnd-kit, sprint auto-planning suggestions, outbox pruning + "Email me a preview" for weekly cadence, roadmap arrow hover → highlight both issue rows.
+   518→---
+   519→Task ID: 16 (round 8)
+   520→Agent: coordinator
+   521→Task: QA assessment (agent-browser) → status STABLE → shipped 4 features: board column drag-reorder, sprint auto-planning, outbox pruning, roadmap arrow-hover row tracing
+   522→
+   523→Work Log:
+   524→STATUS ASSESSMENT
+   525→- Dev server healthy; lint + tsc clean (pre-existing examples/ quirks only); browser sweep (dashboard, saved filters → Advanced Search 11 results, WEB board 5 columns, roadmap toggles, issues, digest) all passed; mobile 390px = 0 overflow; dark mode OK; 0 runtime console errors → phase STABLE → chose FEATURE WORK on the round-7 recommended next steps.
+   526→
+   527→FEATURE 1 — BOARD COLUMN DRAG-REORDER (§7 board config)
+   528→- ColumnManagerPopover rebuilt on dnd-kit sortable: DndContext + SortableContext (verticalListSortingStrategy), closestCenter moved to @dnd-kit/core import, PointerSensor(distance 4) + KeyboardSensor(sortableKeyboardCoordinates).
+   529→- New SortableStatusRow: GripVertical drag handle (listeners on handle only, so Switch/chevrons stay clickable), drag-lift styling (bg-muted + ring + shadow), CSS.Transform transitions; chevron up/down kept as a11y fallback; footer hint "Drag to reorder · saved to your account".
+   530→- Persists through existing saveColPrefs → /api/preferences ("board.columns"); browser-verified: drag "To Do" above "Backlog" re-rendered board columns live, order SURVIVED full page reload, Reset restored default.
+   531→
+   532→FEATURE 2 — SPRINT AUTO-PLANNING (§9 backlog)
+   533→- AutoPlanDialog in BacklogView + "Auto-plan" header button (Sparkles, amber outline, disabled when backlog empty).
+   534→- Velocity = avg done-points over last 3 completed sprints (per-sprint sums of DONE issues' storyPoints); falls back to ASSUMED_VELOCITY=20 labeled "assumed (no sprint history)".
+   535→- Candidates = backlog issues not DONE, ranked by priority.order desc → dueDate asc (nulls last) → backlog order. Greedy pre-selection fills to velocity (skips too-big items, keeps scanning).
+   536→- Capacity card: velocity chip + emerald/amber/rose load bar (≤1x / ≤1.25x / over) + "N pts selected · fits within velocity" + unestimated count.
+   537→- Target sprint Select lists FUTURE sprints + "Create Sprint N" option (POST /api/sprints then batch-move). Apply PATCHes sprintId in chunks of 5 with optimistic applyIssue per response; toast summary "Auto-planned 6 issues into WEB Sprint 3 · 12 pts · velocity 20 pts".
+   538→- Browser-verified: 7 candidates pre-selected (12 pts), toggled WEB-2 off, applied → 6 issues landed in Sprint 3 (WEB-13 pre-existing), WEB-2 stayed in backlog; dark mode dialog verified.
+   539→
+   540→FEATURE 3 — OUTBOX PRUNING + RETENTION (§34 hygiene)
+   541→- GET /api/emails now returns {total, retentionDays} alongside last-50 emails.
+   542→- DELETE /api/emails (ADMIN/MANAGER) prunes EmailLog rows older than 30 days → {deleted, retentionDays}.
+   543→- POST /api/digest/cron auto-prunes >30-day rows after each scheduled run (response includes prunedOld).
+   544→- DigestView outbox header: "last N of total" / "N recorded" + "Clean up" button (Trash2/Loader2) → apiDigest.prune() → toast "Pruned N deliveries older than 30 days" or "Outbox is clean"; refreshed log after prune. Removed stray unused api2 import.
+   545→- Browser-verified: clean-up toast correct (nothing >30d), counts display correct, weekly digest send regression-tested (queued + outbox row).
+   546→
+   547→FEATURE 4 — ROADMAP ARROW-HOVER ROW TRACING (§16×§8 polish)
+   548→- DependencyArrows: per-edge pointerenter/leave → onHover callback; hovered edge at opacity 1 + thickened, all other edges dim to 0.22 (inline transition).
+   549→- RoadmapView holds hoverEdge state → highlightIds {sourceId,targetId}; hovered edge's two issues get amber row treatment (bg-amber-500/10 + inset amber ring) across ALL row kinds: scheduled epic rows, unscheduled label-only rows, ChildRow, StoryRow (new `highlighted` prop on both row components).
+   550→- Legend hint changed to "Hover an arrow to trace its issues". Arrow <g> is now cursor-pointer.
+   551→- Browser-verified via mouse move onto arrow midpoint: hovering "WEB-7 causes WEB-11" highlighted exactly those 2 rows and dimmed the "WEB-11 blocks WEB-9" edge to 0.22; mouse-leave cleared highlights.
+   552→
+   553→QA / VERIFICATION
+   554→- lint + tsc clean (fixed TS2724/TS2305: closestCenter→@dnd-kit/core, sortableKeyboardCoordinates casing).
+   555→- Browser: all four features exercised end-to-end light + dark; mobile 390px = 0 horizontal overflow (board + backlog); fresh-load console = 0 errors (stale Turbopack build-error replays cleared after touch+reload; dev.log confirms no server errors).
+   556→- Data note: Sprint 3 (WEB, FUTURE) now intentionally contains 6 auto-planned issues (12 pts) — realistic planning state left in place to demonstrate the feature.
+   557→
+   558→Stage Summary:
+   559→- Round 8 shipped: per-user board column drag-reorder (dnd-kit sortable), velocity-based sprint auto-planning dialog, email outbox retention/pruning (manual + cron auto), roadmap dependency-arrow hover tracing with row highlighting.
+   560→- Remaining blueprint gaps: email digests via real SMTP (swap point in sendEmail), sprint auto-planning week-scheduling (dates), roadmap arrow hover → floating type label, Issues-table column show/hide, dashboard widget drag (buttons exist).
+   561→- Known minor: velocity "assumed" label uses 20 pts constant; outbox prune is org-wide (no per-user filter); Escape in Select-in-Dialog closes both (shadcn default).
+   562→- Recommended next: Issues-table column manager (show/hide custom fields), dashboard widget drag-reorder, JQL-lite search operators (IN / ORDER BY), automation rule test-run button.
+   563→---
+   564→Task ID: 17 (round 9)
+   565→Agent: coordinator
+   566→Task: QA assessment (agent-browser) → status STABLE → shipped 3 features: automation rule test-run (dry-run), Issues-table column manager, dashboard widget drag-reorder
+   567→
+   568→Work Log:
+   569→STATUS ASSESSMENT
+   570→- Server healthy; lint + tsc clean (pre-existing prisma/seed.ts quirk only); browser sweep passed. Initial console showed BoardView "SortableKeyboardCoordinates" errors → root-caused as STALE Turbopack session history (disk file correct, export verified in node_modules, 0 errors after console --clear + fresh reload). Dev server died once mid-session (known flakiness), restarted detached, stable since. One transient notifications 500 during restart window — not reproducible on fresh load. → phase STABLE → FEATURE WORK on round-8 recommended next steps.
+   571→
+   572→FEATURE 1 — AUTOMATION RULE TEST-RUN / DRY-RUN (§19)
+   573→- automation.ts: exported pure `conditionsMatch(conditions, issue, actorId)` (wraps private evalCondition, no db) and `describeAction(action, memberNames)` returning human-readable "would do" summaries.
+   574→- New API POST /api/automations/test: body { conditions, actions } (tests UNSAVED editor state), scans the 50 most recently updated org issues (optional projectId scope), returns { scanned, matchCount, matches[≤10 with key/summary/status/type/assignee + wouldApply chips], truncated }. Pure evaluation — zero writes.
+   575→- api-client: api2.testAutomation().
+   576→- RuleDialog: "Test run" button (FlaskConical) in footer-left; amber dry-run panel (aria-live) renders "N of M recent issues would match" + scrollable match cards with status dot + emerald would-apply chips, or "no issues would match" empty state, or loading state ("Matching against the 50 most recently updated issues…").
+   577→- Browser-verified: "Escalate critical bugs" (Type equals Bug; Set priority High; Add label security) → "6 of 41 recent issues would match" listing WEB-6/WEB-15/WEB-11/AI-6/APP-11/APP-6 each with "Set priority: High" + "Add label: +security" chips. Dark mode verified.
+   578→
+   579→FEATURE 2 — ISSUES-TABLE COLUMN MANAGER (§12 polish)
+   580→- IssuesTableView: new "Columns" popover (Columns3 icon) with amber "N hidden" badge; Built-in section (Type/Status/Priority/Assignee/Sprint/Pts/Due/Updated — Key+Summary always shown) with switches; Custom fields section with dnd-kit sortable rows (GripVertical handle-only listeners, PointerSensor distance 4, KeyboardSensor sortableKeyboardCoordinates) + switches.
+   581→- Persisted per-user via /api/preferences key "issues.columns" = { hidden[], customOrder[] }, self-healing for new fields; loaded on mount with alive-guard.
+   582→- Table header + body cells conditionally rendered via showCol()/visibleCustomFields; CSV export rebuilt as column-model (respects visibility + custom order).
+   583→- Browser-verified: hid Priority → column gone + badge "1 hidden"; full reload → still hidden (persisted); dragged "GA window" above "Environment" → order applied; dark mode popover clean; restored Priority afterwards (custom drag order intentionally left in place).
+   584→
+   585→FEATURE 3 — DASHBOARD WIDGET DRAG-REORDER (§6 upgrade)
+   586→- DashboardView CustomizeWidgets rebuilt on dnd-kit sortable (same pattern): new SortableWidgetRow with grip handle (listeners on handle only), drag-lift styling (bg-muted + ring + shadow), chevrons kept as a11y fallback, Switches unchanged; footer hint "Drag to reorder · layout is saved to your account…".
+   587→- Browser-verified: dragged "Active sprints" above "My issues" → popover list AND dashboard grid live-reordered; dragged back to restore default order; mobile 390px popover fits with handles visible.
+   588→
+   589→QA / VERIFICATION
+   590→- lint clean; tsc clean for app code (fixed transient self-inflicted parse error mid-edit — aria-label missing paren — corrected and verified on disk).
+   591→- Browser: all three features exercised light + dark; mobile 390px = 0 horizontal overflow (dashboard + customize popover); fresh-load console = 0 errors (stale parse-error replays cleared via touch + console --clear + reload).
+   592→- Dev-env: dev server died once (known), restarted detached via nohup, stable since.
+   593→
+   594→Stage Summary:
+   595→- Round 9 shipped: automation rule test-run dry-run API + preview panel, Issues-table per-user column manager (show/hide + custom-field drag-reorder + CSV-aware), dashboard widget drag-reorder (upgrading buttons to dnd-kit drag).
+   596→- Remaining blueprint gaps: real SMTP for digests (swap point exists), JQL-lite IN/ORDER BY operators, sprint auto-planning date scheduling, workflow designer validation hints, attachments previews.
+   597→- Known minor: automation test-run scans org-wide (project-scope param supported in API but not yet surfaced in UI); Escape in Select-in-Dialog closes both (shadcn default); outbox prune is org-wide.
+   598→- Recommended next: JQL-lite IN / ORDER BY operators in Advanced Search, per-project scope selector for automation test-run, workflow designer edge validation + orphan-status warnings, attachment image previews in issue panel.
+   599→

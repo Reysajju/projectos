@@ -596,3 +596,38 @@ Stage Summary:
 - Remaining blueprint gaps: real SMTP for digests (swap point exists), JQL-lite IN/ORDER BY operators, sprint auto-planning date scheduling, workflow designer validation hints, attachments previews.
 - Known minor: automation test-run scans org-wide (project-scope param supported in API but not yet surfaced in UI); Escape in Select-in-Dialog closes both (shadcn default); outbox prune is org-wide.
 - Recommended next: JQL-lite IN / ORDER BY operators in Advanced Search, per-project scope selector for automation test-run, workflow designer edge validation + orphan-status warnings, attachment image previews in issue panel.
+---
+Task ID: 18 (round 10)
+Agent: coordinator
+Task: QA assessment (agent-browser) → status STABLE → shipped 4 features: JQL-lite IN/NOT IN/ORDER BY, automation test-run project scope, workflow health checks, attachment image lightbox
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy, lint + tsc clean (incl. full parser unit test), browser sweep of Search/Automation/Workflow passed, 0 console errors → phase STABLE → chose FEATURE WORK on round-9 recommended next steps. One suspected syntax error in automations/test route was a false alarm (tool display mangling; file verified correct via od -c).
+
+FEATURE 1 — JQL-LITE IN / NOT IN / ORDER BY (§11 advanced search)
+- jql.ts: new JqlInClause AST node + JqlOrderBy; lexer gains comma token and comma as bare-word terminator; parseJqlQuery() returns { node, orderBy } (parseJql kept as wrapper); parseValueList handles field-typed bare words after lparen; leading `ORDER BY …` (no filter) supported via match-all group; astToJql prints IN/NOT IN with quoteJqlValue; buildWhere expands IN ⇒ OR of = clauses and NOT IN ⇒ AND of != clauses (De Morgan onto existing semantics).
+- advanced route: dbOrderBy() maps sort fields to Prisma orderBy (priority/status/type via .order, project.key, sprint.name, assignee/reporter.name, summary, storyPoints + dueDate with nulls:"last", createdAt/updatedAt, updatedAt tiebreaker deduped); cf.<Name> sorts in memory (fetch 500 → compareCustom number/checkbox/string, nulls last → slice 100); response gains sortedBy/sortedDir.
+- AdvancedSearchView: new example chips (IN lists, NOT IN, ORDER BY combos), amber sort badge (ArrowDownWideNarrow, flipped for asc) in Results header, Syntax dialog gains "Lists & sorting" section with sortable-fields hint; AdvancedSearchPayload typed.
+- Parser unit-tested standalone (10 valid + 8 rejection cases + cf./customfield. prefix normalization); found+fixed 3 tokenizer/parser edge cases before shipping.
+
+FEATURE 2 — AUTOMATION TEST-RUN PROJECT SCOPE (§19)
+- RuleDialog: TestScopeSelect (All projects + each project key · name) beside the Test-run button; scope passes projectId to POST /api/automations/test (API already supported it); changing scope re-runs the dry run automatically; scope resets to all on dialog open; empty-result copy differentiates "in this project".
+
+FEATURE 3 — WORKFLOW HEALTH CHECKS (§18 designer validation)
+- validateWorkflow(): static graph validation (restricted mode) — initial status exists, Start has outgoing transition, BFS reachability from Start (unreachable statuses listed), ≥1 reachable Done-category status, non-Done dead-ends; severity error|warning with statusIds.
+- WorkflowDesignerView: "Workflow health" card (HeartPulse) between connect hint and graph — emerald "All checks passed" / amber warnings / rose errors with per-item severity chips and a footer hover hint; hovering an issue highlights its statuses on the graph (amber ring + lift on nodes via highlightIds set); card border color reflects worst severity.
+
+FEATURE 4 — ATTACHMENT IMAGE LIGHTBOX (§15)
+- AttachmentsSection: image thumbnails + image filenames are now preview buttons (group/thumb zoom + Maximize2 overlay affordance); Dialog lightbox shows large object-contain preview on muted backdrop, name/mime/size/uploader/relative-time metadata, Close + amber Download button (asChild anchor with download attr).
+
+QA / VERIFICATION
+- Dev-env incident: post-edit Turbopack served a STALE pre-edit jql.ts against the new route → 500 "parseJqlQuery is not a function" on every search call; root-caused via dev.log, fixed by full dev-server restart (nohup child was being reaped by sandbox — had to double-fork via start-stop-daemon, now stable PID 27377 re-parented to init). Old browser HMR buffer showed stale ReferenceErrors (barGeom/Menu) — cleared by fresh session, not real bugs.
+- API (curl): 6/6 advanced-search cases pass — IN 13 issues; IN+ORDER BY points DESC 19 issues (proven 13,13,8,8… nulls-last); ORDER BY due ASC 41 (proven ascending, nulls last); bad sort field → friendly "Cannot sort by" error; regression plain query OK; cf.Environment sort path OK. Digest 200.
+- Browser (agent-browser, fresh session): chips + "POINTS · DESC"/"DUE · ASC" badges live; Syntax "Lists & sorting" section visible; automation dialog shows Test-run scope select, WEB-scoped dry run 33/41 matches; Workflow health "ALL CHECKS PASSED" with 9-transition graph intact; WEB-11 pricing-toggle-screenshot.svg lightbox opens with Download; mobile 390px scrollWidth=390 (no overflow) on Dashboard + Advanced Search; final console/page errors = 0; dev.log clean (no 500s).
+
+Stage Summary:
+- Round 10 shipped: JQL-lite IN / NOT IN / ORDER BY end-to-end (parser → sort mapping → UI badges + docs), automation test-run per-project scope, workflow designer health validation with node highlighting, attachment image lightbox.
+- Remaining blueprint gaps: real SMTP for digests (swap point exists), board/backlog quick-filters presets, roadmap arrow hover type label, issue bulk-edit, SLA/breach reporting.
+- Known minor: `cf.X ORDER BY` without any operator is (correctly) a parse error, same as real JQL; automation test-run still scans last 50 issues by updatedAt; outbox prune remains org-wide.
+- Recommended next: issue bulk-edit toolbar (multi-select on Issues table), saved-filter sharing/permissions, roadmap arrow hover floating type label, board quick-filter presets (only mine / recently updated).

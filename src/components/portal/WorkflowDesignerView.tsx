@@ -8,12 +8,14 @@ import {
   ChevronRight,
   Flag,
   GitBranch,
+  HeartPulse,
   Lock,
   Pencil,
   Plus,
   Trash2,
   Unlock,
   X,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -119,6 +121,104 @@ function edgePath(a: NodePos, b: NodePos): string {
   return `M ${x1} ${y1} C ${x1 + bulge} ${y1}, ${x2 - bulge} ${cy}, ${x2} ${y2 - 8}`;
 }
 
+// ─── Health checks (graph validation) ───────────────────────────
+
+interface WorkflowHealthIssue {
+  id: string;
+  severity: "error" | "warning";
+  text: string;
+  statusIds: string[];
+}
+
+/**
+ * Static validation of the transition graph (restricted mode only — an open
+ * workflow allows every move, so there is nothing to validate):
+ *  1. an initial status must exist and have an outgoing transition
+ *  2. every status must be reachable from Start (BFS over allowed moves)
+ *  3. at least one Done-category status must be reachable
+ *  4. non-Done statuses must not be dead ends
+ */
+function validateWorkflow(data: WorkflowPayload): WorkflowHealthIssue[] {
+  const problems: WorkflowHealthIssue[] = [];
+  const { statuses, transitions } = data;
+  if (!statuses.length || !transitions.length) return problems;
+
+  const outgoing = new Map<string, string[]>();
+  for (const t of transitions) {
+    if (!outgoing.has(t.fromStatusId)) outgoing.set(t.fromStatusId, []);
+    outgoing.get(t.fromStatusId)!.push(t.toStatusId);
+  }
+
+  const initial = statuses.find((s) => s.isInitial);
+  if (!initial) {
+    problems.push({
+      id: "initial",
+      severity: "error",
+      text: "No initial status — new issues won't know where to start.",
+      statusIds: [],
+    });
+  } else if (!outgoing.get(initial.id)?.length) {
+    problems.push({
+      id: "initial-exit",
+      severity: "error",
+      text: `Start status "${initial.name}" has no outgoing transition — issues can never leave it.`,
+      statusIds: [initial.id],
+    });
+  }
+
+  // BFS reachability from Start
+  const reachable = new Set<string>();
+  if (initial) {
+    reachable.add(initial.id);
+    const queue = [initial.id];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const nxt of outgoing.get(cur) ?? []) {
+        if (!reachable.has(nxt)) {
+          reachable.add(nxt);
+          queue.push(nxt);
+        }
+      }
+    }
+    const unreachable = statuses.filter((s) => !reachable.has(s.id));
+    if (unreachable.length) {
+      problems.push({
+        id: "unreachable",
+        severity: "warning",
+        text:
+          unreachable.length === 1
+            ? `"${unreachable[0].name}" is unreachable from Start — nothing can move into it.`
+            : `${unreachable.length} statuses are unreachable from Start: ${unreachable.map((s) => s.name).join(", ")}.`,
+        statusIds: unreachable.map((s) => s.id),
+      });
+    }
+    const doneReachable = statuses.some((s) => s.category === "DONE" && reachable.has(s.id));
+    if (!doneReachable) {
+      problems.push({
+        id: "no-done",
+        severity: "error",
+        text: "No Done-category status is reachable — issues can never be completed.",
+        statusIds: statuses.filter((s) => s.category === "DONE").map((s) => s.id),
+      });
+    }
+  }
+
+  const deadEnds = statuses.filter((s) => s.category !== "DONE" && !outgoing.get(s.id)?.length);
+  if (deadEnds.length) {
+    problems.push({
+      id: "dead-end",
+      severity: "warning",
+      text:
+        deadEnds.length === 1
+          ? `"${deadEnds[0].name}" is a dead end — issues can enter but never leave.`
+          : `Dead ends — issues can enter but never leave: ${deadEnds.map((s) => s.name).join(", ")}.`,
+      statusIds: deadEnds.map((s) => s.id),
+    });
+  }
+
+  return problems;
+}
+
 // ─── Component ──────────────────────────────────────────────────
 
 type ConnectState = { active: boolean; from: string | null } | null;
@@ -131,6 +231,7 @@ export function WorkflowDesignerView() {
   const [connect, setConnect] = useState<ConnectState>(null);
   const [editStatus, setEditStatus] = useState<WorkflowStatusDTO | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const load = useCallback(async () => {
@@ -153,6 +254,7 @@ export function WorkflowDesignerView() {
     () => new Map(layouted.nodes.map((n) => [n.status.id, n])),
     [layouted]
   );
+  const healthIssues = useMemo(() => (data ? validateWorkflow(data) : []), [data]);
 
   async function refreshAll() {
     invalidateWorkflowCache();
@@ -296,6 +398,91 @@ export function WorkflowDesignerView() {
         </div>
       )}
 
+      {/* Health checks */}
+      {data.transitions.length > 0 && (
+        <div
+          className={cn(
+            "rounded-lg border bg-card shadow-sm",
+            healthIssues.some((i) => i.severity === "error")
+              ? "border-rose-500/40"
+              : healthIssues.length
+                ? "border-amber-500/40"
+                : "border-emerald-500/30"
+          )}
+        >
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <HeartPulse
+                className={cn(
+                  "size-4",
+                  healthIssues.some((i) => i.severity === "error")
+                    ? "text-rose-500"
+                    : healthIssues.length
+                      ? "text-amber-500"
+                      : "text-emerald-500"
+                )}
+                aria-hidden
+              />
+              Workflow health
+            </h2>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                healthIssues.some((i) => i.severity === "error")
+                  ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                  : healthIssues.length
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              )}
+            >
+              {healthIssues.length === 0
+                ? "All checks passed"
+                : `${healthIssues.filter((i) => i.severity === "error").length} errors · ${healthIssues.filter((i) => i.severity === "warning").length} warnings`}
+            </span>
+          </div>
+          {healthIssues.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-muted-foreground">
+              Every status is reachable from Start, nothing is a dead end, and Done can be reached.
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {healthIssues.map((issue) => (
+                <li
+                  key={issue.id}
+                  onMouseEnter={() => setHighlightIds(new Set(issue.statusIds))}
+                  onMouseLeave={() => setHighlightIds(new Set())}
+                  className={cn(
+                    "flex items-start gap-2.5 px-4 py-2.5 text-sm transition-colors",
+                    issue.statusIds.length && "cursor-default",
+                  )}
+                >
+                  {issue.severity === "error" ? (
+                    <XCircle className="mt-0.5 size-4 shrink-0 text-rose-500" aria-hidden />
+                  ) : (
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden />
+                  )}
+                  <span className="min-w-0 flex-1 text-foreground/90">{issue.text}</span>
+                  {issue.severity === "error" ? (
+                    <span className="shrink-0 rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                      Error
+                    </span>
+                  ) : (
+                    <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                      Warning
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {healthIssues.length > 0 && (
+            <p className="border-t px-4 py-2 text-[11px] text-muted-foreground/70">
+              Hover a check to highlight the statuses it refers to on the graph.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Graph */}
       <div className="overflow-x-auto rounded-lg border bg-card p-2 shadow-sm">
         <div
@@ -376,7 +563,9 @@ export function WorkflowDesignerView() {
                         ? "cursor-pointer border-dashed border-amber-600/60 hover:border-amber-600"
                         : "cursor-default opacity-50"
                     : "cursor-default",
-                  restricted && "shadow-[inset_0_1px_0_rgba(0,0,0,0.02)]"
+                  restricted && "shadow-[inset_0_1px_0_rgba(0,0,0,0.02)]",
+                  highlightIds.has(n.status.id) &&
+                    "border-amber-500 ring-2 ring-amber-500/40 -translate-y-px shadow-md"
                 )}
               >
                 <span className="flex items-center gap-2">

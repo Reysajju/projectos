@@ -416,6 +416,9 @@ export interface AdvancedSearchPayload {
   issues: IssueDTO[];
   parsed: string;
   error: string | null;
+  /** Present when the query carried an ORDER BY clause. */
+  sortedBy: string | null;
+  sortedDir: "asc" | "desc" | null;
 }
 
 // ─── Saved filters ──────────────────────────────────────────────

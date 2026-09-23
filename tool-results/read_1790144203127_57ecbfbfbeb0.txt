@@ -1,0 +1,860 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+     4→import {
+     5→  AlertTriangle,
+     6→  ArrowRight,
+     7→  Check,
+     8→  ChevronRight,
+     9→  Flag,
+    10→  GitBranch,
+    11→  Lock,
+    12→  Pencil,
+    13→  Plus,
+    14→  Trash2,
+    15→  Unlock,
+    16→  X,
+    17→} from "lucide-react";
+    18→import { toast } from "sonner";
+    19→
+    20→import { api3 } from "@/lib/api-client";
+    21→import { useCanManage, usePortalStore } from "@/lib/portal-store";
+    22→import { invalidateWorkflowCache } from "./use-workflow";
+    23→import type {
+    24→  StatusCategory,
+    25→  WorkflowPayload,
+    26→  WorkflowStatusDTO,
+    27→  WorkflowTransitionDTO,
+    28→} from "@/lib/portal-types";
+    29→import { Button } from "@/components/ui/button";
+    30→import {
+    31→  Dialog,
+    32→  DialogContent,
+    33→  DialogDescription,
+    34→  DialogFooter,
+    35→  DialogHeader,
+    36→  DialogTitle,
+    37→} from "@/components/ui/dialog";
+    38→import { Input } from "@/components/ui/input";
+    39→import { Label } from "@/components/ui/label";
+    40→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    41→import { Skeleton } from "@/components/ui/skeleton";
+    42→import { Switch } from "@/components/ui/switch";
+    43→import { EmptyState } from "./EmptyState";
+    44→import { cn } from "@/lib/utils";
+    45→
+    46→// ─── Layout constants (deterministic graph geometry) ────────────
+    47→
+    48→const NODE_W = 208;
+    49→const NODE_H = 62;
+    50→const COL_GAP = 96;
+    51→const ROW_GAP = 18;
+    52→const GRAPH_TOP = 56; // space for column headers
+    53→const GRAPH_PAD = 24;
+    54→
+    55→const CATEGORIES: { key: StatusCategory; label: string; hint: string }[] = [
+    56→  { key: "TODO", label: "To do", hint: "Work not started" },
+    57→  { key: "IN_PROGRESS", label: "In progress", hint: "Active work" },
+    58→  { key: "DONE", label: "Done", hint: "Completed work" },
+    59→];
+    60→
+    61→const STATUS_COLORS = [
+    62→  "#d97706", "#059669", "#7c3aed", "#dc2626", "#0891b2",
+    63→  "#c2410c", "#4d7c0f", "#be185d", "#4338ca", "#78716c",
+    64→];
+    65→
+    66→interface NodePos {
+    67→  status: WorkflowStatusDTO;
+    68→  x: number;
+    69→  y: number;
+    70→  col: number;
+    71→}
+    72→
+    73→function layout(statuses: WorkflowStatusDTO[]): { nodes: NodePos[]; width: number; height: number } {
+    74→  const byCat: Record<StatusCategory, WorkflowStatusDTO[]> = { TODO: [], IN_PROGRESS: [], DONE: [] };
+    75→  for (const s of statuses) byCat[s.category]?.push(s);
+    76→  (Object.keys(byCat) as StatusCategory[]).forEach((k) =>
+    77→    byCat[k].sort((a, b) => a.order - b.order)
+    78→  );
+    79→
+    80→  const nodes: NodePos[] = [];
+    81→  let maxRows = 0;
+    82→  CATEGORIES.forEach((cat, col) => {
+    83→    byCat[cat.key].forEach((status, row) => {
+    84→      nodes.push({
+    85→        status,
+    86→        col,
+    87→        x: GRAPH_PAD + col * (NODE_W + COL_GAP),
+    88→        y: GRAPH_TOP + row * (NODE_H + ROW_GAP),
+    89→      });
+    90→    });
+    91→    maxRows = Math.max(maxRows, byCat[cat.key].length);
+    92→  });
+    93→
+    94→  const width = GRAPH_PAD * 2 + 2 * NODE_W + 2 * COL_GAP;
+    95→  const height = GRAPH_TOP + Math.max(maxRows, 2) * (NODE_H + ROW_GAP) + ROW_GAP;
+    96→  return { nodes, width, height };
+    97→}
+    98→
+    99→/** Cubic bezier path between two node edges. */
+   100→function edgePath(a: NodePos, b: NodePos): string {
+   101→  const x1 = a.x + NODE_W;
+   102→  const y1 = a.y + NODE_H / 2;
+   103→  const x2 = b.x;
+   104→  const y2 = b.y + NODE_H / 2;
+   105→
+   106→  if (b.col > a.col) {
+   107→    const dx = Math.max(36, (x2 - x1) * 0.5);
+   108→    return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+   109→  }
+   110→  if (b.col === a.col) {
+   111→    // same column: loop out to the right
+   112→    const bulge = 46;
+   113→    const cx = x1 + bulge;
+   114→    return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x1} ${y2}`;
+   115→  }
+   116→  // backward edge: loop out to the right of the source then back left
+   117→  const bulge = 56 + (a.col - b.col) * 44;
+   118→  const cy = Math.max(y1, y2) + 34;
+   119→  return `M ${x1} ${y1} C ${x1 + bulge} ${y1}, ${x2 - bulge} ${cy}, ${x2} ${y2 - 8}`;
+   120→}
+   121→
+   122→// ─── Component ──────────────────────────────────────────────────
+   123→
+   124→type ConnectState = { active: boolean; from: string | null } | null;
+   125→
+   126→export function WorkflowDesignerView() {
+   127→  const canManage = useCanManage();
+   128→  const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
+   129→  const [data, setData] = useState<WorkflowPayload | null>(null);
+   130→  const [loading, setLoading] = useState(true);
+   131→  const [connect, setConnect] = useState<ConnectState>(null);
+   132→  const [editStatus, setEditStatus] = useState<WorkflowStatusDTO | null>(null);
+   133→  const [createOpen, setCreateOpen] = useState(false);
+   134→  const svgRef = useRef<SVGSVGElement | null>(null);
+   135→
+   136→  const load = useCallback(async () => {
+   137→    try {
+   138→      const payload = await api3.workflow();
+   139→      setData(payload);
+   140→    } catch (err) {
+   141→      toast.error(err instanceof Error ? err.message : "Failed to load workflow");
+   142→    } finally {
+   143→      setLoading(false);
+   144→    }
+   145→  }, []);
+   146→
+   147→  useEffect(() => {
+   148→    void load();
+   149→  }, [load]);
+   150→
+   151→  const layouted = useMemo(() => layout(data?.statuses ?? []), [data]);
+   152→  const nodeMap = useMemo(
+   153→    () => new Map(layouted.nodes.map((n) => [n.status.id, n])),
+   154→    [layouted]
+   155→  );
+   156→
+   157→  async function refreshAll() {
+   158→    invalidateWorkflowCache();
+   159→    await load();
+   160→    void refreshWorkspace();
+   161→  }
+   162→
+   163→  // ─── Transition actions ───────────────────────────────────────
+   164→
+   165→  const handleNodeClick = useCallback(
+   166→    async (statusId: string) => {
+   167→      if (!connect?.active || !canManage) {
+   168→        return;
+   169→      }
+   170→      if (!connect.from) {
+   171→        setConnect({ active: true, from: statusId });
+   172→        return;
+   173→      }
+   174→      if (connect.from === statusId) {
+   175→        setConnect({ active: true, from: null });
+   176→        return;
+   177→      }
+   178→      try {
+   179→        await api3.createTransition({ fromStatusId: connect.from, toStatusId: statusId });
+   180→        toast.success("Transition added");
+   181→        setConnect(null);
+   182→        await refreshAll();
+   183→      } catch (err) {
+   184→        toast.error(err instanceof Error ? err.message : "Failed to add transition");
+   185→      }
+   186→    },
+   187→    [connect, canManage, refreshAll]
+   188→  );
+   189→
+   190→  async function deleteTransition(t: WorkflowTransitionDTO) {
+   191→    try {
+   192→      await api3.deleteTransition(t.id);
+   193→      toast.success("Transition removed");
+   194→      await refreshAll();
+   195→    } catch (err) {
+   196→      toast.error(err instanceof Error ? err.message : "Failed to remove transition");
+   197→    }
+   198→  }
+   199→
+   200→  // ─── Loading / permission states ─────────────────────────────
+   201→
+   202→  if (loading) {
+   203→    return (
+   204→      <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
+   205→        <Skeleton className="h-8 w-64" />
+   206→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+   207→          <Skeleton className="h-40" />
+   208→          <Skeleton className="h-40" />
+   209→          <Skeleton className="h-40" />
+   210→        </div>
+   211→        <Skeleton className="h-72 w-full" />
+   212→      </div>
+   213→    );
+   214→  }
+   215→
+   216→  if (!data) return null;
+   217→
+   218→  const restricted = data.restricted;
+   219→
+   220→  return (
+   221→    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
+   222→      {/* Header */}
+   223→      <div className="flex flex-wrap items-start justify-between gap-4">
+   224→        <div className="flex items-start gap-3">
+   225→          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-600/10 text-amber-600">
+   226→            <GitBranch className="size-5" />
+   227→          </div>
+   228→          <div>
+   229→            <h1 className="text-xl font-semibold tracking-tight">Workflow designer</h1>
+   230→            <p className="text-sm text-muted-foreground">
+   231→              Shape how issues move through your workspace — statuses and allowed transitions.
+   232→            </p>
+   233→          </div>
+   234→        </div>
+   235→        {canManage && (
+   236→          <div className="flex items-center gap-2">
+   237→            <Button
+   238→              variant={connect?.active ? "default" : "outline"}
+   239→              size="sm"
+   240→              onClick={() => setConnect(connect?.active ? null : { active: true, from: null })}
+   241→            >
+   242→              {connect?.active ? <X className="size-4" /> : <GitBranch className="size-4" />}
+   243→              {connect?.active ? "Cancel connect" : "Connect statuses"}
+   244→            </Button>
+   245→            <Button size="sm" onClick={() => setCreateOpen(true)}>
+   246→              <Plus className="size-4" />
+   247→              New status
+   248→            </Button>
+   249→          </div>
+   250→        )}
+   251→      </div>
+   252→
+   253→      {/* Mode banner */}
+   254→      <div
+   255→        className={cn(
+   256→          "flex items-start gap-3 rounded-lg border p-4",
+   257→          restricted
+   258→            ? "border-amber-600/30 bg-amber-600/5"
+   259→            : "border-emerald-600/30 bg-emerald-600/5"
+   260→        )}
+   261→      >
+   262→        {restricted ? (
+   263→          <Lock className="mt-0.5 size-4 shrink-0 text-amber-600" />
+   264→        ) : (
+   265→          <Unlock className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+   266→        )}
+   267→        <div className="min-w-0 text-sm">
+   268→          {restricted ? (
+   269→            <>
+   270→              <span className="font-medium text-amber-700 dark:text-amber-500">Restricted workflow.</span>{" "}
+   271→              <span className="text-muted-foreground">
+   272→                Issues can only move along the {data.transitions.length} connected transition
+   273→                {data.transitions.length === 1 ? "" : "s"} below. Any status change outside the graph is
+   274→                rejected.
+   275→              </span>
+   276→            </>
+   277→          ) : (
+   278→            <>
+   279→              <span className="font-medium text-emerald-700 dark:text-emerald-500">Open workflow.</span>{" "}
+   280→              <span className="text-muted-foreground">
+   281→                Every status can move to every other status. Connect statuses to restrict movements —
+   282→                defining the first transition switches the workspace to a restricted workflow.
+   283→              </span>
+   284→            </>
+   285→          )}
+   286→        </div>
+   287→      </div>
+   288→
+   289→      {/* Connect-mode hint */}
+   290→      {connect?.active && (
+   291→        <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-600/50 bg-amber-600/5 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-500">
+   292→          <ArrowRight className="size-4" />
+   293→          {connect.from
+   294→            ? "Now pick the target status to complete the transition."
+   295→            : "Pick the source status to start a transition."}
+   296→        </div>
+   297→      )}
+   298→
+   299→      {/* Graph */}
+   300→      <div className="overflow-x-auto rounded-lg border bg-card p-2 shadow-sm">
+   301→        <div
+   302→          className="relative"
+   303→          style={{ minWidth: layouted.width, height: layouted.height }}
+   304→        >
+   305→          {/* Column headers */}
+   306→          {CATEGORIES.map((cat, i) => (
+   307→            <div
+   308→              key={cat.key}
+   309→              className="absolute top-0"
+   310→              style={{ left: GRAPH_PAD + i * (NODE_W + COL_GAP), width: NODE_W }}
+   311→            >
+   312→              <div className="flex items-baseline gap-2 whitespace-nowrap">
+   313→                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   314→                  {cat.label}
+   315→                </span>
+   316→                <span className="text-[10px] text-muted-foreground/70">{cat.hint}</span>
+   317→              </div>
+   318→              <div className="mt-1.5 h-0.5 rounded-full bg-border" />
+   319→            </div>
+   320→          ))}
+   321→
+   322→          <svg
+   323→            ref={svgRef}
+   324→            className="pointer-events-none absolute inset-0"
+   325→            width={layouted.width}
+   326→            height={layouted.height}
+   327→          >
+   328→            {/* Edges */}
+   329→            {data.transitions.map((t) => {
+   330→              const a = nodeMap.get(t.fromStatusId);
+   331→              const b = nodeMap.get(t.toStatusId);
+   332→              if (!a || !b) return null;
+   333→              const d = edgePath(a, b);
+   334→              const stroke = b.status.color || "#d97706";
+   335→              return (
+   336→                <g
+   337→                  key={t.id}
+   338→                  className="pointer-events-auto cursor-pointer group"
+   339→                  onClick={() => canManage && deleteTransition(t)}
+   340→                >
+   341→                  <title>{`${a.status.name} → ${b.status.name}${canManage ? " (click to remove)" : ""}`}</title>
+   342→                  <path d={d} fill="none" stroke="transparent" strokeWidth={14} />
+   343→                  <path
+   344→                    d={d}
+   345→                    fill="none"
+   346→                    stroke={stroke}
+   347→                    strokeWidth={2}
+   348→                    strokeDasharray="6 4"
+   349→                    className="opacity-60 transition-all group-hover:opacity-100 group-hover:[stroke-width:3]"
+   350→                  />
+   351→                  <circle r={4.5} fill={stroke} className="opacity-80 group-hover:opacity-100">
+   352→                    <animateMotion dur="2.6s" repeatCount="indefinite" path={d} />
+   353→                  </circle>
+   354→                </g>
+   355→              );
+   356→            })}
+   357→          </svg>
+   358→
+   359→          {/* Nodes */}
+   360→          {layouted.nodes.map((n) => {
+   361→            const isConnectSource = connect?.from === n.status.id;
+   362→            const isConnectTarget = connect?.active && !!connect.from && connect.from !== n.status.id;
+   363→            return (
+   364→              <button
+   365→                key={n.status.id}
+   366→                type="button"
+   367→                onClick={() => void handleNodeClick(n.status.id)}
+   368→                style={{ left: n.x, top: n.y, width: NODE_W, height: NODE_H }}
+   369→                className={cn(
+   370→                  "group absolute flex flex-col justify-center rounded-lg border-2 bg-card px-3 text-left shadow-sm transition-all",
+   371→                  "hover:shadow-md hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600/50",
+   372→                  connect?.active
+   373→                    ? isConnectSource
+   374→                      ? "border-amber-600 ring-2 ring-amber-600/30 cursor-pointer"
+   375→                      : isConnectTarget
+   376→                        ? "cursor-pointer border-dashed border-amber-600/60 hover:border-amber-600"
+   377→                        : "cursor-default opacity-50"
+   378→                    : "cursor-default",
+   379→                  restricted && "shadow-[inset_0_1px_0_rgba(0,0,0,0.02)]"
+   380→                )}
+   381→              >
+   382→                <span className="flex items-center gap-2">
+   383→                  <span
+   384→                    className="inline-block size-2.5 shrink-0 rounded-full"
+   385→                    style={{ backgroundColor: n.status.color }}
+   386→                  />
+   387→                  <span className="truncate text-sm font-medium">{n.status.name}</span>
+   388→                  {n.status.isInitial && (
+   389→                    <span
+   390→                      title="Initial status — new issues start here"
+   391→                      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-600/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-500"
+   392→                    >
+   393→                      <Flag className="size-2.5" />
+   394→                      Start
+   395→                    </span>
+   396→                  )}
+   397→                  {canManage && !connect?.active && (
+   398→                    <span
+   399→                      role="button"
+   400→                      tabIndex={0}
+   401→                      aria-label={`Edit ${n.status.name}`}
+   402→                      onClick={(e) => {
+   403→                        e.stopPropagation();
+   404→                        setEditStatus(n.status);
+   405→                      }}
+   406→                      onKeyDown={(e) => {
+   407→                        if (e.key === "Enter" || e.key === " ") {
+   408→                          e.stopPropagation();
+   409→                          setEditStatus(n.status);
+   410→                        }
+   411→                      }}
+   412→                      className="ml-auto inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/0 transition-colors hover:bg-muted hover:text-foreground group-hover:text-muted-foreground"
+   413→                    >
+   414→                      <Pencil className="size-3" />
+   415→                    </span>
+   416→                  )}
+   417→                </span>
+   418→                <span className="mt-0.5 pl-[18px] text-[11px] text-muted-foreground">
+   419→                  {n.status.issueCount} issue{n.status.issueCount === 1 ? "" : "s"}
+   420→                </span>
+   421→              </button>
+   422→            );
+   423→          })}
+   424→
+   425→          {/* Empty state within graph */}
+   426→          {data.statuses.length === 0 && (
+   427→            <div className="absolute inset-0 flex items-center justify-center">
+   428→              <EmptyState
+   429→                icon={GitBranch}
+   430→                title="No statuses yet"
+   431→                hint="Create your first status to start shaping the workflow."
+   432→              />
+   433→            </div>
+   434→          )}
+   435→        </div>
+   436→      </div>
+   437→
+   438→      {/* Transition list */}
+   439→      <div className="rounded-lg border bg-card shadow-sm">
+   440→        <div className="flex items-center justify-between border-b px-4 py-3">
+   441→          <h2 className="text-sm font-semibold">
+   442→            Transitions
+   443→            <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+   444→              {data.transitions.length}
+   445→            </span>
+   446→          </h2>
+   447→          {restricted && canManage && (
+   448→            <Button
+   449→              variant="ghost"
+   450→              size="sm"
+   451→              className="h-7 text-xs text-muted-foreground hover:text-foreground"
+   452→              onClick={async () => {
+   453→                if (!confirm("Remove ALL transitions? The workflow becomes open (every move allowed).")) return;
+   454→                try {
+   455→                  await Promise.all(data.transitions.map((t) => api3.deleteTransition(t.id)));
+   456→                  toast.success("Workflow reset to open");
+   457→                  await refreshAll();
+   458→                } catch (err) {
+   459→                  toast.error(err instanceof Error ? err.message : "Failed to reset workflow");
+   460→                }
+   461→              }}
+   462→            >
+   463→              <Unlock className="size-3.5" />
+   464→              Reset to open workflow
+   465→            </Button>
+   466→          )}
+   467→        </div>
+   468→        {data.transitions.length === 0 ? (
+   469→          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+   470→            No transitions configured — every move is allowed.
+   471→            {canManage && (
+   472→              <div className="mt-3">
+   473→                <Button variant="outline" size="sm" onClick={() => setConnect({ active: true, from: null })}>
+   474→                  <GitBranch className="size-4" />
+   475→                  Connect statuses
+   476→                </Button>
+   477→              </div>
+   478→            )}
+   479→          </div>
+   480→        ) : (
+   481→          <ul className="max-h-64 divide-y overflow-y-auto">
+   482→            {data.transitions.map((t) => {
+   483→              const from = data.statuses.find((s) => s.id === t.fromStatusId);
+   484→              const to = data.statuses.find((s) => s.id === t.toStatusId);
+   485→              if (!from || !to) return null;
+   486→              return (
+   487→                <li key={t.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+   488→                  <StatusChip status={from} />
+   489→                  <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+   490→                  <StatusChip status={to} />
+   491→                  <span className="ml-auto text-xs text-muted-foreground">
+   492→                    {from.category !== to.category
+   493→                      ? `${CATEGORY_LABEL[from.category]} → ${CATEGORY_LABEL[to.category]}`
+   494→                      : `within ${CATEGORY_LABEL[from.category]}`}
+   495→                  </span>
+   496→                  {canManage && (
+   497→                    <Button
+   498→                      variant="ghost"
+   499→                      size="icon"
+   500→                      className="size-7 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600"
+   501→                      onClick={() => void deleteTransition(t)}
+   502→                      aria-label={`Delete transition ${from.name} to ${to.name}`}
+   503→                    >
+   504→                      <Trash2 className="size-3.5" />
+   505→                    </Button>
+   506→                  )}
+   507→                </li>
+   508→              );
+   509→            })}
+   510→          </ul>
+   511→        )}
+   512→      </div>
+   513→
+   514→      {/* Dialogs */}
+   515→      <StatusDialog
+   516→        open={createOpen}
+   517→        onOpenChange={setCreateOpen}
+   518→        onSaved={refreshAll}
+   519→      />
+   520→      {editStatus && (
+   521→        <EditStatusDialog
+   522→          status={editStatus}
+   523→          statuses={data.statuses}
+   524→          onClose={() => setEditStatus(null)}
+   525→          onSaved={refreshAll}
+   526→        />
+   527→      )}
+   528→    </div>
+   529→  );
+   530→}
+   531→
+   532→// ─── Sub-components ─────────────────────────────────────────────
+   533→
+   534→function StatusChip({ status }: { status: WorkflowStatusDTO }) {
+   535→  return (
+   536→    <span className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-xs font-medium">
+   537→      <span className="size-2 rounded-full" style={{ backgroundColor: status.color }} />
+   538→      {status.name}
+   539→    </span>
+   540→  );
+   541→}
+   542→
+   543→const CATEGORY_LABEL: Record<StatusCategory, string> = {
+   544→  TODO: "To do",
+   545→  IN_PROGRESS: "In progress",
+   546→  DONE: "Done",
+   547→};
+   548→
+   549→function StatusDialog({
+   550→  open,
+   551→  onOpenChange,
+   552→  onSaved,
+   553→}: {
+   554→  open: boolean;
+   555→  onOpenChange: (open: boolean) => void;
+   556→  onSaved: () => Promise<void>;
+   557→}) {
+   558→  const [name, setName] = useState("");
+   559→  const [category, setCategory] = useState<StatusCategory>("TODO");
+   560→  const [color, setColor] = useState(STATUS_COLORS[0]);
+   561→  const [saving, setSaving] = useState(false);
+   562→
+   563→  async function submit() {
+   564→    if (!name.trim()) {
+   565→      toast.error("Give the status a name");
+   566→      return;
+   567→    }
+   568→    setSaving(true);
+   569→    try {
+   570→      await api3.createStatus({ name: name.trim(), category, color });
+   571→      toast.success(`Status "${name.trim()}" created`);
+   572→      setName("");
+   573→      setCategory("TODO");
+   574→      setColor(STATUS_COLORS[0]);
+   575→      onOpenChange(false);
+   576→      await onSaved();
+   577→    } catch (err) {
+   578→      toast.error(err instanceof Error ? err.message : "Failed to create status");
+   579→    } finally {
+   580→      setSaving(false);
+   581→    }
+   582→  }
+   583→
+   584→  return (
+   585→    <Dialog open={open} onOpenChange={onOpenChange}>
+   586→      <DialogContent className="sm:max-w-md">
+   587→        <DialogHeader>
+   588→          <DialogTitle>New status</DialogTitle>
+   589→          <DialogDescription>
+   590→            Add a column to your workflow. Place it in a category to position it on the board.
+   591→          </DialogDescription>
+   592→        </DialogHeader>
+   593→        <div className="space-y-4">
+   594→          <div className="space-y-1.5">
+   595→            <Label htmlFor="status-name">Name</Label>
+   596→            <Input
+   597→              id="status-name"
+   598→              value={name}
+   599→              onChange={(e) => setName(e.target.value)}
+   600→              placeholder="e.g. Blocked, QA passed…"
+   601→              maxLength={40}
+   602→              autoFocus
+   603→            />
+   604→          </div>
+   605→          <div className="space-y-1.5">
+   606→            <Label>Category</Label>
+   607→            <Select value={category} onValueChange={(v) => setCategory(v as StatusCategory)}>
+   608→              <SelectTrigger>
+   609→                <SelectValue />
+   610→              </SelectTrigger>
+   611→              <SelectContent>
+   612→                {CATEGORIES.map((c) => (
+   613→                  <SelectItem key={c.key} value={c.key}>
+   614→                    {c.label}
+   615→                  </SelectItem>
+   616→                ))}
+   617→              </SelectContent>
+   618→            </Select>
+   619→            <p className="text-xs text-muted-foreground">
+   620→              {category === "DONE"
+   621→                ? "Issues here count as completed."
+   622→                : category === "IN_PROGRESS"
+   623→                  ? "Issues here are actively worked on."
+   624→                  : "Issues here are waiting to be started."}
+   625→            </p>
+   626→          </div>
+   627→          <div className="space-y-1.5">
+   628→            <Label>Color</Label>
+   629→            <div className="flex flex-wrap gap-1.5">
+   630→              {STATUS_COLORS.map((c) => (
+   631→                <button
+   632→                  key={c}
+   633→                  type="button"
+   634→                  aria-label={`Color ${c}`}
+   635→                  onClick={() => setColor(c)}
+   636→                  className={cn(
+   637→                    "size-6 rounded-full border-2 transition-transform hover:scale-110",
+   638→                    color === c ? "border-foreground scale-110" : "border-transparent"
+   639→                  )}
+   640→                  style={{ backgroundColor: c }}
+   641→                />
+   642→              ))}
+   643→            </div>
+   644→          </div>
+   645→        </div>
+   646→        <DialogFooter>
+   647→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   648→            Cancel
+   649→          </Button>
+   650→          <Button onClick={() => void submit()} disabled={saving}>
+   651→            {saving ? "Creating…" : "Create status"}
+   652→          </Button>
+   653→        </DialogFooter>
+   654→      </DialogContent>
+   655→    </Dialog>
+   656→  );
+   657→}
+   658→
+   659→function EditStatusDialog({
+   660→  status,
+   661→  statuses,
+   662→  onClose,
+   663→  onSaved,
+   664→}: {
+   665→  status: WorkflowStatusDTO;
+   666→  statuses: WorkflowStatusDTO[];
+   667→  onClose: () => void;
+   668→  onSaved: () => Promise<void>;
+   669→}) {
+   670→  const [name, setName] = useState(status.name);
+   671→  const [category, setCategory] = useState<StatusCategory>(status.category);
+   672→  const [color, setColor] = useState(status.color);
+   673→  const [isInitial, setIsInitial] = useState(status.isInitial);
+   674→  const [saving, setSaving] = useState(false);
+   675→  const [deleteOpen, setDeleteOpen] = useState(false);
+   676→  const [moveTo, setMoveTo] = useState<string>("__auto__");
+   677→  const [deleting, setDeleting] = useState(false);
+   678→
+   679→  const others = statuses.filter((s) => s.id !== status.id);
+   680→  const dirty =
+   681→    name !== status.name || category !== status.category || color !== status.color || isInitial !== status.isInitial;
+   682→
+   683→  async function save() {
+   684→    if (!name.trim()) {
+   685→      toast.error("Name cannot be empty");
+   686→      return;
+   687→    }
+   688→    setSaving(true);
+   689→    try {
+   690→      await api3.patchStatus(status.id, {
+   691→        name: name.trim(),
+   692→        category,
+   693→        color,
+   694→        isInitial,
+   695→      });
+   696→      toast.success("Status updated");
+   697→      onClose();
+   698→      await onSaved();
+   699→    } catch (err) {
+   700→      toast.error(err instanceof Error ? err.message : "Failed to update status");
+   701→    } finally {
+   702→      setSaving(false);
+   703→    }
+   704→  }
+   705→
+   706→  async function doDelete() {
+   707→    setDeleting(true);
+   708→    try {
+   709→      await api3.deleteStatus(status.id, moveTo === "__auto__" ? undefined : moveTo);
+   710→      toast.success(`Status "${status.name}" deleted`);
+   711→      setDeleteOpen(false);
+   712→      onClose();
+   713→      await onSaved();
+   714→    } catch (err) {
+   715→      toast.error(err instanceof Error ? err.message : "Failed to delete status");
+   716→    } finally {
+   717→      setDeleting(false);
+   718→    }
+   719→  }
+   720→
+   721→  return (
+   722→    <>
+   723→      <Dialog open onOpenChange={(o) => !o && onClose()}>
+   724→        <DialogContent className="sm:max-w-md">
+   725→          <DialogHeader>
+   726→            <DialogTitle>Edit status</DialogTitle>
+   727→            <DialogDescription>
+   728→              {status.issueCount} issue{status.issueCount === 1 ? "" : "s"} currently in this status.
+   729→            </DialogDescription>
+   730→          </DialogHeader>
+   731→          <div className="space-y-4">
+   732→            <div className="space-y-1.5">
+   733→              <Label htmlFor="edit-status-name">Name</Label>
+   734→              <Input
+   735→                id="edit-status-name"
+   736→                value={name}
+   737→                onChange={(e) => setName(e.target.value)}
+   738→                maxLength={40}
+   739→              />
+   740→            </div>
+   741→            <div className="grid grid-cols-2 gap-3">
+   742→              <div className="space-y-1.5">
+   743→                <Label>Category</Label>
+   744→                <Select value={category} onValueChange={(v) => setCategory(v as StatusCategory)}>
+   745→                  <SelectTrigger>
+   746→                    <SelectValue />
+   747→                  </SelectTrigger>
+   748→                  <SelectContent>
+   749→                    {CATEGORIES.map((c) => (
+   750→                      <SelectItem key={c.key} value={c.key}>
+   751→                        {c.label}
+   752→                      </SelectItem>
+   753→                    ))}
+   754→                  </SelectContent>
+   755→                </Select>
+   756→              </div>
+   757→              <div className="space-y-1.5">
+   758→                <Label>Color</Label>
+   759→                <div className="flex flex-wrap gap-1 pt-1.5">
+   760→                  {STATUS_COLORS.map((c) => (
+   761→                    <button
+   762→                      key={c}
+   763→                      type="button"
+   764→                      aria-label={`Color ${c}`}
+   765→                      onClick={() => setColor(c)}
+   766→                      className={cn(
+   767→                        "size-5 rounded-full border-2 transition-transform hover:scale-110",
+   768→                        color === c ? "border-foreground scale-110" : "border-transparent"
+   769→                      )}
+   770→                      style={{ backgroundColor: c }}
+   771→                    />
+   772→                  ))}
+   773→                </div>
+   774→              </div>
+   775→            </div>
+   776→            <div className="flex items-center justify-between rounded-lg border p-3">
+   777→              <div>
+   778→                <div className="flex items-center gap-1.5 text-sm font-medium">
+   779→                  <Flag className="size-3.5 text-amber-600" />
+   780→                  Initial status
+   781→                </div>
+   782→                <p className="text-xs text-muted-foreground">New issues start in this status.</p>
+   783→              </div>
+   784→              <Switch checked={isInitial} onCheckedChange={setIsInitial} />
+   785→            </div>
+   786→          </div>
+   787→          <DialogFooter className="items-center">
+   788→            <Button
+   789→              variant="ghost"
+   790→              className="mr-auto text-rose-600 hover:bg-rose-500/10 hover:text-rose-600"
+   791→              onClick={() => setDeleteOpen(true)}
+   792→              disabled={deleting}
+   793→            >
+   794→              <Trash2 className="size-4" />
+   795→              Delete
+   796→            </Button>
+   797→            <Button variant="outline" onClick={onClose}>
+   798→              Cancel
+   799→            </Button>
+   800→            <Button onClick={() => void save()} disabled={saving || !dirty}>
+   801→              {saving ? "Saving…" : "Save changes"}
+   802→            </Button>
+   803→          </DialogFooter>
+   804→        </DialogContent>
+   805→      </Dialog>
+   806→
+   807→      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+   808→        <DialogContent className="sm:max-w-md">
+   809→          <DialogHeader>
+   810→            <DialogTitle className="flex items-center gap-2">
+   811→              <AlertTriangle className="size-4 text-amber-600" />
+   812→              Delete “{status.name}”?
+   813→            </DialogTitle>
+   814→            <DialogDescription>
+   815→              {status.issueCount > 0
+   816→                ? `${status.issueCount} issue${status.issueCount === 1 ? "" : "s"} will be moved to another status. Transitions connected to this status are removed.`
+   817→                : "Transitions connected to this status are removed."}
+   818→            </DialogDescription>
+   819→          </DialogHeader>
+   820→          {status.issueCount > 0 && (
+   821→            <div className="space-y-1.5">
+   822→              <Label>Move issues to</Label>
+   823→              <Select value={moveTo} onValueChange={setMoveTo}>
+   824→                <SelectTrigger>
+   825→                  <SelectValue />
+   826→                </SelectTrigger>
+   827→                <SelectContent>
+   828→                  <SelectItem value="__auto__">
+   829→                    <span className="flex items-center gap-2">
+   830→                      <Check className="size-3.5 text-emerald-600" />
+   831→                      Automatic (initial status)
+   832→                    </span>
+   833→                  </SelectItem>
+   834→                  {others.map((s) => (
+   835→                    <SelectItem key={s.id} value={s.id}>
+   836→                      <span className="flex items-center gap-2">
+   837→                        <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} />
+   838→                        {s.name}
+   839→                        <ChevronRight className="size-3 text-muted-foreground" />
+   840→                      </span>
+   841→                    </SelectItem>
+   842→                  ))}
+   843→                </SelectContent>
+   844→              </Select>
+   845→            </div>
+   846→          )}
+   847→          <DialogFooter>
+   848→            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+   849→              Cancel
+   850→            </Button>
+   851→            <Button variant="destructive" onClick={() => void doDelete()} disabled={deleting}>
+   852→              {deleting ? "Deleting…" : "Delete status"}
+   853→            </Button>
+   854→          </DialogFooter>
+   855→        </DialogContent>
+   856→      </Dialog>
+   857→    </>
+   858→  );
+   859→}
+   860→
