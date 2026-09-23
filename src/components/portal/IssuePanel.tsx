@@ -39,6 +39,7 @@ import { PriorityIcon } from "./PriorityIcon";
 import { RelativeTime, formatDate } from "./RelativeTime";
 import { CustomFieldValue } from "./CustomFieldValue";
 import { AttachmentsSection } from "./AttachmentsSection";
+import { LinksSection } from "./LinksSection";
 import { useWorkflowData } from "./use-workflow";
 import { Button } from "@/components/ui/button";
 import {
@@ -276,10 +277,12 @@ export function IssuePanel() {
     <Sheet open={openIssueId !== null} onOpenChange={(o) => !o && setOpenIssue(null)}>
       <SheetContent
         side="right"
+        aria-describedby={undefined}
         className="w-full gap-0 overflow-hidden p-0 sm:max-w-[560px] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5"
       >
         {loading && !issue ? (
           <div className="space-y-4 p-6">
+            <SheetTitle className="sr-only">Issue details</SheetTitle>
             <Skeleton className="h-6 w-40" />
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-40 w-full" />
@@ -406,7 +409,7 @@ export function IssuePanel() {
                     </div>
                   </div>
                 ) : issue.description ? (
-                  <div className="prose-sm mt-1.5 max-w-none rounded-md border border-border bg-muted/50/50 p-3 text-sm leading-relaxed text-foreground/90 [&_a]:text-amber-700 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1">
+                  <div className="prose-sm mt-1.5 max-w-none rounded-md border border-border bg-muted/50 p-3 text-sm leading-relaxed text-foreground/90 [&_a]:text-amber-700 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1">
                     <ReactMarkdown>{issue.description}</ReactMarkdown>
                   </div>
                 ) : (
@@ -695,6 +698,19 @@ export function IssuePanel() {
                 </div>
               </section>
 
+              {/* Linked issues (§16) */}
+              {detail && (
+                <LinksSection
+                  issueId={detail.issue.id}
+                  issueKey={detail.issue.key}
+                  links={detail.links}
+                  canEdit={canEditFiles}
+                  onChange={(next) => setDetail((d) => (d ? { ...d, links: next } : d))}
+                />
+              )}
+
+              <Separator className="my-5" />
+
               {/* Subtasks */}
               <section className="mt-5" aria-label="Subtasks">
                 <div className="flex items-center gap-2">
@@ -776,7 +792,7 @@ export function IssuePanel() {
                             <button
                               type="button"
                               aria-label="Delete comment"
-                              className="ml-auto rounded p-1 text-stone-300 hover:bg-rose-500/100/10 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
+                              className="ml-auto rounded p-1 text-stone-300 hover:bg-rose-500/10 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
                               onClick={() => void deleteComment(c.id)}
                             >
                               <Trash2 className="size-3.5" aria-hidden />
@@ -869,7 +885,7 @@ export function IssuePanel() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1.5 text-rose-600 hover:bg-rose-500/100/10 hover:text-rose-700"
+                className="gap-1.5 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700"
                 disabled={!canDelete}
                 title={canDelete ? "Delete issue" : "Only ADMIN/MANAGER can delete issues"}
                 onClick={() => setConfirmDelete(true)}
@@ -900,6 +916,7 @@ export function IssuePanel() {
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center">
+            <SheetTitle className="sr-only">Issue details</SheetTitle>
             <EmptyState icon={GitBranch} title="No issue selected" hint="Pick an issue from a board, table or search." />
           </div>
         )}

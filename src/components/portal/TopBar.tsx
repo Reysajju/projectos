@@ -40,6 +40,7 @@ const VIEW_TITLES: Record<string, string> = {
   search: "Advanced Search",
   automations: "Automation",
   webhooks: "Webhooks",
+  apikeys: "API Keys",
   workflow: "Workflow Designer",
   team: "Team",
   settings: "Settings",

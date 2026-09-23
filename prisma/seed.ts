@@ -18,7 +18,7 @@ const daysAhead = (n: number) => new Date(now + n * day);
 
 async function clean() {
   const tables = [
-    "webhookDelivery", "webhook", "attachment",
+    "apiKey", "webhookDelivery", "webhook", "attachment", "issueLink",
     "notification", "activity", "comment", "issueLabel", "issue",
     "sprint", "project", "label", "priority", "status", "issueType",
     "organizationMember", "organization", "session", "user",
@@ -377,6 +377,27 @@ async function main() {
     },
   });
 
+  // ─── API keys (demo — blueprint §38; raw tokens are NOT recoverable) ──
+  function seedApiKey(name: string, scopes: string[], creatorId: string, created: Date, lastUsedDaysAgo: number | null) {
+    const raw = `posk_${crypto.randomBytes(24).toString("base64url")}`;
+    return db.apiKey.create({
+      data: {
+        orgId: org.id,
+        name,
+        prefix: raw.slice(0, 14),
+        keyHash: crypto.createHash("sha256").update(raw).digest("hex"),
+        scopes: JSON.stringify(scopes),
+        createdById: creatorId,
+        createdAt: created,
+        lastUsedAt: lastUsedDaysAgo == null ? null : daysAgo(lastUsedDaysAgo),
+      },
+    });
+  }
+  await seedApiKey("CI pipeline", ["read", "write"], marcus.id, daysAgo(12), 0);
+  await seedApiKey("Monitoring scripts", ["read"], sarah.id, daysAgo(30), 2).then((k) =>
+    db.apiKey.update({ where: { id: k.id }, data: { revokedAt: daysAgo(1) } })
+  );
+
   // ─── Attachments (demo — real files under db/uploads) ─────────
   const uploadsRoot = path.join(process.cwd(), "db", "uploads", org.id);
   fs.mkdirSync(uploadsRoot, { recursive: true });
@@ -442,6 +463,34 @@ Notes: looks correct on Firefox — suspect locale-aware number formatting in us
     ),
     daysAgo(1)
   );
+
+  // ─── Issue links (demo — blueprint §16) ─────────────────────
+  const linkSeed = [
+    // Can't sign off the perf budget while the pricing toggle bug is open
+    { type: "BLOCKS", from: w9, to: w7, by: aisha, at: daysAgo(3) },
+    // Testimonials carousel must land before the SEO audit sees final copy
+    { type: "BLOCKS", from: w8, to: w10, by: lena, at: daysAgo(1) },
+    // MDX blog migration caused the 404 regression in backlog
+    { type: "CAUSES", from: w6, to: w13, by: marcus, at: daysAgo(2) },
+    // The pricing page ships the annual toggle that carries the discount bug
+    { type: "CAUSES", from: w5, to: w9, by: sarah, at: daysAgo(2) },
+    // Docs section and i18n scaffolding both restructure navigation
+    { type: "RELATES", from: w11, to: w12, by: marcus, at: daysAgo(4) },
+    // Case-studies template overlaps the testimonials carousel scope
+    { type: "DUPLICATES", from: w14, to: w8, by: lena, at: daysAgo(1) },
+  ] as const;
+  for (const l of linkSeed) {
+    await db.issueLink.create({
+      data: {
+        orgId: org.id,
+        type: l.type,
+        sourceId: l.from.id,
+        targetId: l.to.id,
+        createdById: l.by.id,
+        createdAt: l.at,
+      },
+    });
+  }
 
   // ─── Backdate timestamps for charts (burndown / created-vs-resolved) ──
   const doneIssues = await db.issue.findMany({ where: { status: { category: "DONE" } } });

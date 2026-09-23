@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Archive, Check, ChevronRight, GitBranch, LayoutDashboard, LogOut, Menu, Monitor, Moon, RadioTower, Search, Settings, Sun, UserCircle2, Users, Zap } from "lucide-react";
+import { Archive, Check, ChevronRight, GitBranch, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, RadioTower, Search, Settings, Sun, UserCircle2, Users, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 
@@ -27,6 +27,7 @@ const NAV: { view: PortalView; label: string; icon: typeof LayoutDashboard; mana
   { view: "search", label: "Search", icon: Search },
   { view: "automations", label: "Automation", icon: Zap },
   { view: "webhooks", label: "Webhooks", icon: RadioTower, manageOnly: true },
+  { view: "apikeys", label: "API Keys", icon: KeyRound, manageOnly: true },
   { view: "workflow", label: "Workflow", icon: GitBranch, manageOnly: true },
   { view: "team", label: "Team", icon: Users },
   { view: "settings", label: "Settings", icon: Settings },

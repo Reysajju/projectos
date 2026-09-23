@@ -11,6 +11,8 @@
  *
  * Fields: status, type, priority, assignee, reporter, sprint, project,
  *         summary, description, label, points, due, created, updated,
+ *         link (= blocks|duplicates|relates|causes|none|any),
+ *         linked (= <issue key>, e.g. linked = WEB-9),
  *         cf.<Name> / customfield.<Name> (org custom fields)
  * Values: quoted "multi word", bare-word, `me`, `none`, `anyone`, `overdue`,
  *         `7d` style relative days (created/updated), numbers for points.
@@ -46,6 +48,7 @@ export class JqlError extends Error {
 export const JQL_FIELDS = [
   "status", "type", "priority", "assignee", "reporter", "sprint",
   "project", "summary", "description", "label", "points", "due", "created", "updated",
+  "link", "linked",
 ] as const;
 
 const KEYWORDS = new Set(["AND", "OR"]);
@@ -315,6 +318,39 @@ function clauseToWhere(c: JqlClause, ctx: JqlContext): Where {
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
       const key = field === "created" ? "createdAt" : "updatedAt";
       return not ? { [key]: { lt: since } } : { [key]: { gte: since } };
+    }
+    case "link": {
+      // link = blocks|duplicates|relates|causes|none|any
+      const TYPE_ALIASES: Record<string, string[]> = {
+        blocks: ["BLOCKS", "block"],
+        duplicates: ["DUPLICATES", "duplicate", "duplicated"],
+        relates: ["RELATES", "relate", "related"],
+        causes: ["CAUSES", "cause"],
+      };
+      if (v === "none" || v === "empty") {
+        return not
+          ? { OR: [{ linksFrom: { some: {} } }, { linksTo: { some: {} } }] }
+          : { AND: [{ linksFrom: { none: {} } }, { linksTo: { none: {} } }] };
+      }
+      if (v === "any") {
+        return not
+          ? { AND: [{ linksFrom: { none: {} } }, { linksTo: { none: {} } }] }
+          : { OR: [{ linksFrom: { some: {} } }, { linksTo: { some: {} } }] };
+      }
+      const aliases = TYPE_ALIASES[v];
+      if (!aliases) return {}; // unknown type → no filter (forgiving)
+      const typeFilter = { type: { in: aliases } };
+      const has = { OR: [{ linksFrom: { some: typeFilter } }, { linksTo: { some: typeFilter } }] };
+      const hasNot = { AND: [{ linksFrom: { none: typeFilter } }, { linksTo: { none: typeFilter } }] };
+      return not ? hasNot : has;
+    }
+    case "linked": {
+      // linked = WEB-9 → issues with any link (either direction) to WEB-9
+      const key = raw.toUpperCase();
+      if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) return {};
+      const some = { OR: [{ source: { key } }, { target: { key } }] };
+      const noneOf = { AND: [{ linksFrom: { none: some } }, { linksTo: { none: some } }] };
+      return not ? noneOf : { OR: [{ linksFrom: { some } }, { linksTo: { some } }] };
     }
     default:
       return {};

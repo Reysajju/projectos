@@ -38,7 +38,11 @@ import type {
   WorkflowStatusDTO,
   StatusCategory,
   AttachmentDTO,
+  IssueLinkCreateBody,
+  LinkedIssueDTO,
   WebhooksPayload,
+  ApiKeysPayload,
+  ApiKeyDTO,
   WebhookDTO,
   WebhookDeliveryDTO,
   WebhookTestResult,
@@ -134,6 +138,14 @@ export const api = {
   deleteComment: (commentId: string) =>
     apiFetch<{ ok: boolean }>(`/api/comments/${commentId}`, { method: "DELETE" }),
 
+  // ─── Issue links (blueprint §16) ───────────────────────────
+
+  addIssueLink: (issueId: string, body: IssueLinkCreateBody) =>
+    apiFetch<LinkedIssueDTO>(`/api/issues/${issueId}/links`, jsonBody(body, "POST")),
+
+  deleteIssueLink: (linkId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/links/${linkId}`, { method: "DELETE" }),
+
   // ─── Attachments (multipart — no JSON content-type) ─────────
 
   uploadAttachment: async (issueId: string, file: File): Promise<AttachmentDTO> => {
@@ -187,6 +199,13 @@ export const api = {
     apiFetch<{ ok: boolean }>("/api/notifications/read", jsonBody({ ids }, "POST")),
 
   search: (q: string) => apiFetch<SearchPayload>(`/api/search?q=${encodeURIComponent(q)}`),
+
+  // ─── Per-user preferences (dashboard widgets etc.) ───────────
+
+  getPreferences: () => apiFetch<Record<string, unknown>>("/api/preferences"),
+
+  setPreference: (key: string, value: unknown) =>
+    apiFetch<{ ok: boolean }>("/api/preferences", jsonBody({ key, value }, "PATCH")),
 
   // ─── Reports ──────────────────────────────────────────────────
 
@@ -305,4 +324,16 @@ export const apiWebhooks = {
     apiFetch<WebhookTestResult>(`/api/webhooks/${id}/test`, { method: "POST" }),
 
   receiverPings: () => apiFetch<ReceiverPingsPayload>("/api/webhook-receiver"),
+};
+
+// ─── API keys (blueprint §38 second half) ──────────────────────
+
+export const apiKeys = {
+  list: () => apiFetch<ApiKeysPayload>("/api/keys"),
+
+  create: (body: { name: string; scopes: string[] }) =>
+    apiFetch<{ key: ApiKeyDTO; token: string }>("/api/keys", jsonBody(body, "POST")),
+
+  revoke: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/keys/${id}`, { method: "DELETE" }),
 };

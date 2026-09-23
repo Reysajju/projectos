@@ -149,8 +149,36 @@ export interface IssueDTO {
   subtaskCount: number;
   subtasksDone: number;
   attachmentCount: number;
+  linkCount: number;
   /** Custom field values keyed by fieldId (values are strings). */
   customFields: Record<string, string>;
+}
+
+// ─── Issue links (blueprint §16) ────────────────────────────
+
+export type IssueLinkType = "BLOCKS" | "DUPLICATES" | "RELATES" | "CAUSES";
+
+/** One end of a link as seen from the issue being viewed. */
+export interface LinkedIssueDTO {
+  linkId: string;
+  type: IssueLinkType;
+  /** outward: this issue <verb> other; inward: this issue is <verb-passive> by other */
+  direction: "outward" | "inward";
+  other: {
+    id: string;
+    key: string;
+    summary: string;
+    typeName: string;
+    typeIcon: string;
+    typeColor: string;
+    statusName: string;
+    statusColor: string;
+    statusCategory: "TODO" | "IN_PROGRESS" | "DONE";
+    priorityName: string | null;
+    priorityColor: string | null;
+  };
+  createdBy: { id: string; name: string; avatarColor: string };
+  createdAt: string;
 }
 
 export interface MemberWithRoleDTO extends UserDTO {
@@ -205,6 +233,13 @@ export interface IssueDetailPayload {
   activity: ActivityDTO[];
   subtasks: IssueDTO[];
   attachments: AttachmentDTO[];
+  links: LinkedIssueDTO[];
+}
+
+export interface IssueLinkCreateBody {
+  type: IssueLinkType;
+  /** Issue key of the other end, e.g. WEB-9. */
+  targetKey: string;
 }
 
 export interface DashboardStatsDTO {
@@ -506,6 +541,24 @@ export interface WebhookDTO {
 
 export interface WebhooksPayload {
   webhooks: WebhookDTO[];
+}
+
+// ─── API keys (blueprint §38 second half) ───────────────────
+
+export interface ApiKeyDTO {
+  id: string;
+  name: string;
+  /** First characters of the raw token, for identification only. */
+  prefix: string;
+  scopes: ("read" | "write")[];
+  lastUsedAt: string | null;
+  revoked: boolean;
+  createdAt: string;
+  creator: { id: string; name: string; avatarColor: string };
+}
+
+export interface ApiKeysPayload {
+  keys: ApiKeyDTO[];
 }
 
 export interface WebhookTestResult {

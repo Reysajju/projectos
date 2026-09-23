@@ -369,3 +369,76 @@ Stage Summary:
 - Remaining from blueprint: email digests/transactional email (§34), API keys for programmatic access (§38 second half), mentions-in-editor rich input, dashboard widget customization, board column manager merging WIP + status ordering, Issue Links (§16, issue_links table).
 - Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); external webhook URLs fail in sandbox by design (logged FAILED); receiver ring buffer is in-memory (resets on restart).
 - Recommended next: Issue Links (§16 blocks/blocks-by on issue panel), API keys + "personal access tokens" UI, email digest preview page, dashboard widget toggles persisted per user.
+---
+Task ID: 13 (round 5, part A)
+Agent: coordinator
+Task: QA assessment + Issue Links (§16) end-to-end
+
+Work Log:
+- Baseline QA: server 200, lint clean, dashboard/board/panel render, 0 console errors, sprint data verified correct (WEB Sprint 2 genuinely has 0 DONE issues — not a bug).
+- Issue Links (§16) FULL STACK:
+  - Schema: IssueLink (orgId, type BLOCKS|DUPLICATES|RELATES|CAUSES, sourceId→targetId, createdById) with @@unique([sourceId,targetId,type]) + indexes; db:pushed.
+  - API: POST /api/issues/[id]/links {type,targetKey} (validates key format, org-scope, self-link 400, both-direction dup 409; Activity rows on BOTH issues, notification to target assignee, webhook issue.updated link.added); DELETE /api/links/[id] (org-scoped, activity + webhook link.removed); issue detail GET now returns links[] (direction-aware DTO with other-issue summary/status/type/priority).
+  - JQL: link = blocks|duplicates|relates|causes|none|any (aliases incl. != ) and linked = <KEY> (either direction).
+  - UI: LinksSection.tsx — type-chip composer w/ debounced live search picker (/api/search, self excluded), verb-phrased rows (blocks / is blocked by / causes / is caused by / duplicates / relates to), status dot, strikethrough on DONE, click-through nav, hover delete, empty state, amber "Blocked by WEB-11" warning banner for inward blocks from non-done issues.
+  - IssueDTO.linkCount + 🔗 badge on board cards; demo links seeded (live DB corrected to live numbering; seed.ts has its own consistent set).
+- ApiError arg order fixed in new routes (message, status). tsc clean (excluding pre-existing seed/examples quirks).
+
+Verification:
+- curl: 201 create, 409 dup, 400 self, 404 bad key, 400 bad type, 200 delete; detail payload direction correct.
+- JQL: link = blocks → WEB-9/10/8/7; linked = WEB-9 → WEB-5/9/7; link = none → 31; link != blocks AND link != none correct.
+- Browser: WEB-9 shows "is blocked by WEB-11" + amber Blocked banner; composer type chips + live search ("scaffolding" → WEB-14) → click → toast "WEB-9 blocks WEB-14" + row appears; WEB-14 shows inward "is blocked by WEB-9"; delete via row hover works; link rows/counts update.
+
+Stage Summary:
+- §16 Issue Links SHIPPED. Remaining blueprint gaps: API keys/PATs (§38 second half), email digests (§34), mentions-in-editor, dashboard widget customization, board column manager.
+- Recommended next: API keys + PAT UI, then dashboard widget toggles.
+---
+Task ID: 13 (round 5, part B)
+Agent: coordinator
+Task: API Keys + Bearer auth (§38 second half) end-to-end
+
+Work Log:
+- Schema: ApiKey (orgId, name, prefix display, keyHash UNIQUE sha256, scopes JSON, creator, lastUsedAt, revokedAt) + relations; db:pushed.
+- Auth: getSession() now accepts `Authorization: Bearer posk_…` FIRST (before cookie). keyHash lookup; revoked → null; lastUsedAt stamped max once/min; scope→effective role: read→VIEWER, write→MEMBER. Every /api route inherits bearer auth automatically; ADMIN/MANAGER endpoints stay token-proof (keys/webhooks/workflow check canManage on the derived role).
+- API: GET/POST /api/keys (ADMIN/MANAGER; token returned ONCE), DELETE /api/keys/[id] = revoke (prefix kept for audit).
+- UI: ApiKeysView + sidebar "API Keys" (manageOnly) + TopBar title. Explainer panel w/ copy-able curl example; create dialog (name + write-scope switch); one-time token dialog w/ copy + "I've stored it safely"; key cards w/ Active/Revoked badges, scope chips, prefix mono, last-used relative time, revoke confirm.
+- Seed: 2 demo keys (active CI pipeline, revoked Monitoring scripts).
+- RelativeTime gained optional prefix prop.
+
+Verification (curl + browser):
+- Bearer workspace 200; create issue 201 (WEB-20) + PATCH 200 with write key; read-only key create → 403 "Viewers cannot make changes"; bogus token 401; keys list via token → 403; revoke 200 then hash lookup fails.
+- Browser: created "Grafana dashboard widget" key through the dialog (name → write toggle → Generate → one-time token dialog w/ copy) — all rendered correctly; revoked + active cards show correct badges/dimming; lastUsedAt ticking.
+- Dev-server hiccup: port 3000 died after Prisma client regen (db:push); restarted `bun run dev` detached — healthy again.
+
+Stage Summary:
+- §38 API keys SHIPPED (schema → auth → routes → UI → seed). Demo keys renamed to realistic names (CI pipeline / Monitoring scripts / Grafana dashboard widget).
+- Remaining: dashboard widget customization, email digests, mentions-in-editor, board column manager.
+- Next: per-user dashboard widget toggles + ordering persisted via UserPreference.
+---
+Task ID: 13 (round 5, part C — final)
+Agent: coordinator
+Task: Dashboard widget customization (§6) + styling/qa polish pass
+
+Work Log:
+- Per-user preferences store: UserPreference (userId, key UNIQUE-together, JSON value) + GET/PATCH /api/preferences (upsert, 10KB cap) + api.getPreferences/setPreference.
+- Dashboard widget customization: Customize popover (SlidersHorizontal) — per-widget visibility Switch + up/down reorder over a registry of the 5 widgets (my-issues, active-sprints, created-vs-resolved, upcoming-due, activity). Prefs persisted under key "dashboard.widgets" {order, hidden}; unknown/missing widget ids self-heal (registry growth safe); grid uses [grid-auto-flow:dense] so gaps fill naturally. KPI row always visible.
+- Styling/QA polish:
+  - Fixed invalid Tailwind classes across 3 files: rose-500/100/10 → rose-500/10, amber-500/100/10 → amber-500/10, muted/50/50 → muted/50 (IssuePanel, AdvancedSearchView, AutomationsView).
+  - Dark mode: dashboard + reports charts were unreadable (hardcoded #e7e5e4 grid/#78716c ticks/light tooltip). Both now theme-aware via useTheme (grid #44403c, ticks #a8a29e, tooltip bg/border dark variants, velocity committed bar #44403c, cursor #292524).
+  - Dark: activity divider divide-stone-100 → dark:divide-stone-800 added.
+  - Board due-date chip: whitespace-nowrap (was wrapping on badge-dense cards).
+  - A11y: IssuePanel Sheet now always has a title (sr-only "Issue details" in loading/empty branches) + aria-describedby={undefined} → Radix DialogTitle/Description console warnings eliminated (verified 0 occurrences after open/close).
+  - JQL help: FIELD_HINTS + EXAMPLES gained link/linked rows so §16 search is discoverable.
+- Dev-env: dev server died after Prisma client regen mid-round; restarted detached, stable since.
+
+Verification:
+- Customize flow: toggle "Active sprints" off + reorder (My issues down) → GET /api/preferences shows persisted {order:[active-sprints,my-issues,…], hidden:[active-sprints]} → hard reload applies layout (Active sprints card gone) → reset to defaults via API for clean demo state.
+- Mobile 390px: 390=390 no overflow, hamburger nav, single-column widgets.
+- Dark mode: dashboard, reports (burndown/velocity gridlines+ticks readable), issue panel links rows + blocked banner — all clean.
+- lint + tsc clean; GET / 200; a11y warnings 0.
+
+Stage Summary:
+- Round 5 shipped: §16 Issue Links (full stack incl. JQL + blocked-banner UX), §38 API Keys/Bearer auth (full stack + explainer + one-time token UX), §6 dashboard widget customization (server-persisted), plus a real styling/QA pass (invalid classes, dark-mode charts, a11y, mobile).
+- Remaining blueprint gaps: email digests/transactional email (§34), mentions-in-editor rich input, board column manager (merge WIP + status ordering), custom field inline editing on tables.
+- Known minor: pre-existing seed.ts userId2 tsc quirk (out of app scope); dev-tools overlay can intercept clicks in preview (dev-only).
+- Recommended next: email digest preview page + cron, board column manager, mentions-in-editor.

@@ -34,6 +34,9 @@ model User {
   automationRules AutomationRule[] @relation("AutomationCreator")
   attachments   Attachment[]        @relation("AttachmentUploader")
   webhooks      Webhook[]           @relation("WebhookCreator")
+  issueLinksCreated IssueLink[]     @relation("IssueLinkCreator")
+  apiKeysCreated ApiKey[]           @relation("ApiKeyCreator")
+  preferences   UserPreference[]
 }
 
 model Session {
@@ -68,6 +71,8 @@ model Organization {
   workflowTransitions WorkflowTransition[]
   attachments  Attachment[]
   webhooks     Webhook[]
+  issueLinks   IssueLink[]
+  apiKeys      ApiKey[]
 }
 
 model OrganizationMember {
@@ -242,6 +247,8 @@ model Issue {
   activities    Activity[]
   notifications Notification[]
   attachments   Attachment[]
+  linksFrom     IssueLink[] @relation("IssueLinkSource")
+  linksTo       IssueLink[] @relation("IssueLinkTarget")
 
   @@unique([projectId, number])
   @@index([orgId, key])
@@ -360,6 +367,63 @@ model Attachment {
 
   @@index([issueId])
   @@index([orgId, createdAt])
+}
+
+// ─── Issue links (blueprint §16 — blocks / duplicates / relates / causes) ───
+// Directed edges: "source <verb> target" e.g. WEB-9 BLOCKS WEB-11.
+// VERBS (display): BLOCKS → blocks / is blocked by; DUPLICATES → duplicates /
+// is duplicated by; CAUSES → causes / is caused by; RELATES → relates to.
+model IssueLink {
+  id          String   @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  type        String   // BLOCKS | DUPLICATES | RELATES | CAUSES
+  sourceId    String
+  source      Issue    @relation("IssueLinkSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId    String
+  target      Issue    @relation("IssueLinkTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User     @relation("IssueLinkCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([sourceId, targetId, type])
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([orgId])
+}
+
+// ─── User preferences (blueprint §6 — per-user UI settings) ───────────────
+// Generic per-user key/value store (value is a JSON string). Used for
+// dashboard widget visibility/ordering today; other UI prefs tomorrow.
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key    String
+  value  String
+
+  @@unique([userId, key])
+}
+
+// ─── API keys (blueprint §38 second half — programmatic access) ───────────
+// Bearer tokens: `Authorization: Bearer posk_<secret>`. Only the sha256 hash
+// is stored; the raw token is shown once at creation. Scope maps to an
+// effective role: read → VIEWER, write → MEMBER (never ADMIN/MANAGER).
+model ApiKey {
+  id         String    @id @default(cuid())
+  orgId      String
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name       String
+  prefix     String    // first chars of the token, shown in the UI for identification
+  keyHash    String    @unique // sha256 hex of the full raw token
+  scopes     String    // JSON string[] — subset of ["read", "write"]
+  createdById String
+  creator    User      @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId])
 }
 
 // ─── Webhooks engine (blueprint §38 — signed deliveries + log) ──────────────

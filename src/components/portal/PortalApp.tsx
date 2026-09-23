@@ -20,6 +20,7 @@ import { SearchPalette } from "./SearchPalette";
 import { AdvancedSearchView } from "./AdvancedSearchView";
 import { AutomationsView } from "./AutomationsView";
 import { WebhooksView } from "./WebhooksView";
+import { ApiKeysView } from "./ApiKeysView";
 import { WorkflowDesignerView } from "./WorkflowDesignerView";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -127,6 +128,8 @@ export function PortalApp() {
         return <AutomationsView />;
       case "webhooks":
         return <WebhooksView />;
+      case "apikeys":
+        return <ApiKeysView />;
       case "workflow":
         return <WorkflowDesignerView />;
       case "settings":

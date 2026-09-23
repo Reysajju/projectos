@@ -1,9 +1,24 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { db } from "@/lib/db";
 import type { User, Organization } from "@prisma/client";
 
 export const SESSION_COOKIE = "pos_session";
 const SESSION_DAYS = 30;
+
+// ─── API keys (blueprint §38) ───────────────────────────────────
+
+export const API_KEY_PREFIX = "posk_";
+
+/** sha256 hex of a raw API token — the only thing we store. */
+export function hashApiKey(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+/** Generate a fresh API token + its display prefix + storage hash. */
+export function generateApiKey(): { raw: string; prefix: string; keyHash: string } {
+  const raw = `${API_KEY_PREFIX}${randomBytes(24).toString("base64url")}`;
+  return { raw, prefix: raw.slice(0, 14), keyHash: hashApiKey(raw) };
+}
 
 // ─── Password hashing (scrypt, no native deps) ──────────────────
 
@@ -54,7 +69,40 @@ export type SessionInfo = {
   membershipId: string;
 };
 
+function parseScopes(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function getSession(req: Request): Promise<SessionInfo | null> {
+  // ── 1. API-key bearer tokens (blueprint §38): Authorization: Bearer posk_…
+  const authHeader = req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const raw = authHeader.slice(7).trim();
+    if (raw.startsWith(API_KEY_PREFIX)) {
+      const apiKey = await db.apiKey.findUnique({
+        where: { keyHash: hashApiKey(raw) },
+        include: { org: true, creator: true },
+      });
+      if (!apiKey || apiKey.revokedAt) return null;
+      // Throttled last-used stamp: at most one write per key per minute.
+      const now = Date.now();
+      if (!apiKey.lastUsedAt || now - apiKey.lastUsedAt.getTime() > 60_000) {
+        void db.apiKey
+          .update({ where: { id: apiKey.id }, data: { lastUsedAt: new Date() } })
+          .catch(() => undefined);
+      }
+      const scopes = parseScopes(apiKey.scopes);
+      const role = scopes.includes("write") ? "MEMBER" : "VIEWER";
+      return { user: apiKey.creator, org: apiKey.org, role, membershipId: `apikey:${apiKey.id}` };
+    }
+  }
+
+  // ── 2. Browser session cookie.
   // Works with both NextRequest (cookies.get) and plain Request (header parse)
   let token: string | undefined;
   const cookieHeader = req.headers.get("cookie") ?? "";

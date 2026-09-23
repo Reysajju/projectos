@@ -42,6 +42,7 @@ const EXAMPLES = [
   "due = overdue",
   "points > 0 AND sprint = active", // shows parser error styling too
   "label = security",
+  "link = blocks AND status != Done",
 ];
 
 const FIELD_HINTS: [string, string][] = [
@@ -55,6 +56,8 @@ const FIELD_HINTS: [string, string][] = [
   ["points", "= 5 · != 3"],
   ["due", "= overdue · = none"],
   ["created / updated", "= 7d · = today"],
+  ["link", "= blocks · = none · != relates"],
+  ["linked", "= WEB-9 · != WEB-9"],
 ];
 
 export function AdvancedSearchView() {
@@ -218,7 +221,7 @@ export function AdvancedSearchView() {
               setQuery(ex);
               void run(ex);
             }}
-            className="rounded-full border border-border bg-muted/40 px-2.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-amber-500/50 hover:bg-amber-500/100/10 hover:text-amber-600"
+            className="rounded-full border border-border bg-muted/40 px-2.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-600"
           >
             {ex}
           </button>
@@ -255,7 +258,7 @@ export function AdvancedSearchView() {
                   type="button"
                   aria-label={`Delete filter ${f.name}`}
                   onClick={() => void deleteFilter(f)}
-                  className="rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-rose-500/100/10 hover:text-rose-600 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-rose-500/10 hover:text-rose-600 focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="size-3.5" aria-hidden />
                 </button>

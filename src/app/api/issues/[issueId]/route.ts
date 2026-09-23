@@ -6,7 +6,7 @@ import { getSession } from "@/lib/auth";
 import { logActivity, notify, transitionIssue } from "@/lib/workflow";
 import { runAutomations } from "@/lib/automation";
 import { fireWebhooks } from "@/lib/webhooks";
-import { issueInclude, parseJsonRecord, toActivityDTO, toAttachmentDTO, toCommentDTO, toIssueDTO } from "@/lib/dto";
+import { issueInclude, parseJsonRecord, toActivityDTO, toAttachmentDTO, toCommentDTO, toIssueDTO, toLinkedIssueDTO } from "@/lib/dto";
 import {
   ApiError,
   canWrite,
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const issue = await db.issue.findUnique({ where: { id: issueId }, include: issueInclude });
     if (!issue || issue.orgId !== session.org.id) return notFound("Issue not found");
 
-    const [comments, activity, subtasks, attachments] = await Promise.all([
+    const [comments, activity, subtasks, attachments, links] = await Promise.all([
       db.comment.findMany({
         where: { issueId },
         include: { author: true },
@@ -81,6 +81,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         include: { uploadedBy: true },
         orderBy: { createdAt: "desc" },
       }),
+      db.issueLink.findMany({
+        where: { OR: [{ sourceId: issueId }, { targetId: issueId }] },
+        include: {
+          source: { include: { type: true, status: true, priority: true } },
+          target: { include: { type: true, status: true, priority: true } },
+          createdBy: true,
+        },
+        orderBy: { createdAt: "asc" },
+      }),
     ]);
 
     return NextResponse.json({
@@ -89,6 +98,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       activity: activity.map(toActivityDTO),
       subtasks: subtasks.map(toIssueDTO),
       attachments: attachments.map(toAttachmentDTO),
+      links: links.map((l) => toLinkedIssueDTO(l, issueId)),
     });
   });
 }

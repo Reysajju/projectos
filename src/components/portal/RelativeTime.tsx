@@ -2,11 +2,12 @@
 
 import { format, formatDistanceToNow, isValid } from "date-fns";
 
-export function RelativeTime({ date, className }: { date: string; className?: string }) {
+export function RelativeTime({ date, className, prefix }: { date: string; className?: string; prefix?: string }) {
   const d = new Date(date);
   if (!isValid(d)) return <span className={className}>—</span>;
   return (
     <time dateTime={date} className={className} title={format(d, "MMM d, yyyy h:mm a")}>
+      {prefix ?? ""}
       {formatDistanceToNow(d, { addSuffix: true })}
     </time>
   );

@@ -4,6 +4,7 @@ import type {
   Attachment,
   Comment,
   CustomField,
+  IssueLink,
   IssueType,
   Label,
   Notification,
@@ -28,6 +29,7 @@ import type {
   CommentDTO, ActivityDTO, NotificationDTO,
   IssueDTO,
   AttachmentDTO, WebhookDTO, WebhookDeliveryDTO,
+  IssueLinkType, LinkedIssueDTO,
 } from "./portal-types";
 
 export type {
@@ -39,6 +41,7 @@ export type {
   CommentDTO, ActivityDTO, NotificationDTO,
   IssueDTO,
   AttachmentDTO, WebhookDTO, WebhookDeliveryDTO,
+  IssueLinkType, LinkedIssueDTO,
 } from "./portal-types";
 
 // ─── Shared Prisma includes (keeps select-shapes consistent) ────
@@ -52,7 +55,7 @@ export const issueInclude = {
   project: { select: { key: true, name: true } },
   labels: { include: { label: true } },
   subtasks: { select: { status: { select: { category: true } } } },
-  _count: { select: { comments: true, subtasks: true, attachments: true } },
+  _count: { select: { comments: true, subtasks: true, attachments: true, linksFrom: true, linksTo: true } },
 } satisfies Prisma.IssueInclude;
 
 export type IssueWithRelations = Prisma.IssueGetPayload<{ include: typeof issueInclude }>;
@@ -290,6 +293,43 @@ export function toIssueDTO(i: IssueWithRelations): IssueDTO {
     subtaskCount: i._count.subtasks,
     subtasksDone: i.subtasks.filter((st) => st.status.category === "DONE").length,
     attachmentCount: i._count.attachments,
+    linkCount: i._count.linksFrom + i._count.linksTo,
     customFields: parseJsonRecord(i.customFields),
+  };
+}
+
+// ─── Issue links (blueprint §16) ────────────────────────────
+
+export type IssueLinkWithEnds = Prisma.IssueLinkGetPayload<{
+  include: {
+    source: { include: { type: true; status: true; priority: true } };
+    target: { include: { type: true; status: true; priority: true } };
+    createdBy: true;
+  };
+}>;
+
+/** Describe a link from the perspective of `issueId` (one of the two ends). */
+export function toLinkedIssueDTO(link: IssueLinkWithEnds, issueId: string): LinkedIssueDTO {
+  const outward = link.sourceId === issueId;
+  const other = outward ? link.target : link.source;
+  return {
+    linkId: link.id,
+    type: link.type as IssueLinkType,
+    direction: outward ? "outward" : "inward",
+    other: {
+      id: other.id,
+      key: other.key,
+      summary: other.summary,
+      typeName: other.type.name,
+      typeIcon: other.type.icon,
+      typeColor: other.type.color,
+      statusName: other.status.name,
+      statusColor: other.status.color,
+      statusCategory: other.status.category as LinkedIssueDTO["other"]["statusCategory"],
+      priorityName: other.priority?.name ?? null,
+      priorityColor: other.priority?.color ?? null,
+    },
+    createdBy: toUserDTO(link.createdBy),
+    createdAt: link.createdAt.toISOString(),
   };
 }

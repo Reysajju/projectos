@@ -18,6 +18,7 @@ import {
   YAxis,
 } from "recharts";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
 
 import { api } from "@/lib/api-client";
 import type { BurndownPayload, OverviewPayload, SprintDTO, VelocityPayload } from "@/lib/portal-types";
@@ -36,11 +37,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const CHART_COLORS = ["#d97706", "#059669", "#7c3aed", "#e11d48", "#ea580c", "#0d9488", "#57534e", "#65a30d"];
 
-const tooltipStyle = {
-  borderRadius: 8,
-  border: "1px solid #e7e5e4",
-  fontSize: 12,
-} as const;
+const TICK_LIGHT = "#78716c";
+const TICK_DARK = "#a8a29e";
+
+function tooltipStyle(dark: boolean) {
+  return {
+    borderRadius: 8,
+    border: dark ? "1px solid #44403c" : "1px solid #e7e5e4",
+    fontSize: 12,
+    backgroundColor: dark ? "#1c1917" : "#ffffff",
+    color: dark ? "#fafaf9" : "#1c1917",
+  } as const;
+}
 
 function ChartCard({
   title,
@@ -72,6 +80,12 @@ function ChartCard({
 }
 
 export function ReportsView() {
+  const { resolvedTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
+  const tick = dark ? TICK_DARK : TICK_LIGHT;
+  const grid = dark ? "#44403c" : "#e7e5e4";
+  const cursor = dark ? "#292524" : "#f5f5f4";
+  const tip = tooltipStyle(dark);
   const { data } = useProjectData();
   const projectId = data?.project.id ?? "";
 
@@ -204,10 +218,10 @@ export function ReportsView() {
           {burndown && burndown.points.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={burndown.points} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} labelStyle={{ fontWeight: 600, color: "#1c1917" }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={grid} vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={tip} labelStyle={{ fontWeight: 600, color: dark ? "#fafaf9" : "#1c1917" }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line type="monotone" dataKey="remaining" name="Remaining" stroke="#d97706" strokeWidth={2.5} dot={{ r: 2 }} />
                 <Line type="monotone" dataKey="ideal" name="Ideal" stroke="#a8a29e" strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
@@ -228,12 +242,12 @@ export function ReportsView() {
           {velocity && velocity.sprints.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={velocity.sprints} margin={{ top: 8, right: 8, left: -18, bottom: 0 }} barGap={2}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} labelStyle={{ fontWeight: 600, color: "#1c1917" }} cursor={{ fill: "#f5f5f4" }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={grid} vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: tick }} tickLine={false} axisLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={tip} labelStyle={{ fontWeight: 600, color: dark ? "#fafaf9" : "#1c1917" }} cursor={{ fill: cursor }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="committed" name="Committed" fill="#e7e5e4" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="committed" name="Committed" fill={dark ? "#44403c" : "#e7e5e4"} radius={[4, 4, 0, 0]} />
                 <Bar dataKey="completed" name="Completed" fill="#059669" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -257,7 +271,7 @@ export function ReportsView() {
                     <Cell key={entry.name} fill={entry.color || CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip contentStyle={tip} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
               </PieChart>
             </ResponsiveContainer>
@@ -270,10 +284,10 @@ export function ReportsView() {
           {overview && overview.priorityDist.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={overview.priorityDist} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" width={64} tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#f5f5f4" }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={grid} horizontal={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" width={64} tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={tip} cursor={{ fill: cursor }} />
                 <Bar dataKey="count" name="Issues" radius={[0, 4, 4, 0]}>
                   {overview.priorityDist.map((entry, i) => (
                     <Cell key={entry.name} fill={entry.color || CHART_COLORS[i % CHART_COLORS.length]} />
@@ -290,10 +304,10 @@ export function ReportsView() {
           {overview && overview.assigneeLoad.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={overview.assigneeLoad} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }} barGap={1}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11, fill: "#78716c" }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "#f5f5f4" }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={grid} horizontal={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11, fill: tick }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={tip} cursor={{ fill: cursor }} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="open" name="Open" fill="#d97706" radius={[0, 3, 3, 0]} />
                 <Bar dataKey="done" name="Done" fill="#059669" radius={[0, 3, 3, 0]} />
@@ -313,7 +327,7 @@ export function ReportsView() {
                     <Cell key={entry.name} fill={entry.color || CHART_COLORS[i % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip contentStyle={tip} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
               </PieChart>
             </ResponsiveContainer>

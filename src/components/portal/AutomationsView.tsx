@@ -338,7 +338,7 @@ function RuleDialog({
                     <button
                       type="button"
                       aria-label={`Remove condition ${i + 1}`}
-                      className="rounded p-1 text-muted-foreground/60 hover:bg-rose-500/100/10 hover:text-rose-600"
+                      className="rounded p-1 text-muted-foreground/60 hover:bg-rose-500/10 hover:text-rose-600"
                       onClick={() => setConditions((c) => c.filter((_, j) => j !== i))}
                     >
                       <Trash2 className="size-3.5" aria-hidden />
@@ -388,7 +388,7 @@ function RuleDialog({
                     <button
                       type="button"
                       aria-label={`Remove action ${i + 1}`}
-                      className="rounded p-1 text-muted-foreground/60 hover:bg-rose-500/100/10 hover:text-rose-600"
+                      className="rounded p-1 text-muted-foreground/60 hover:bg-rose-500/10 hover:text-rose-600"
                       onClick={() => setActions((a) => a.filter((_, j) => j !== i))}
                     >
                       <Trash2 className="size-3.5" aria-hidden />
@@ -597,7 +597,7 @@ export function AutomationsView() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="size-8 text-muted-foreground hover:bg-rose-500/100/10 hover:text-rose-600"
+                      className="size-8 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-600"
                       aria-label={`Delete ${rule.name}`}
                       onClick={() => void remove(rule)}
                     >

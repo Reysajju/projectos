@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, GitBranch, MessageSquare, Paperclip } from "lucide-react";
+import { CalendarClock, GitBranch, Link2, MessageSquare, Paperclip } from "lucide-react";
 
 import type { IssueDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
@@ -75,10 +75,16 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
             {issue.attachmentCount}
           </span>
         )}
+        {(issue.linkCount ?? 0) > 0 && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/80" title={`${issue.linkCount} linked issues`}>
+            <Link2 className="size-3" aria-hidden />
+            {issue.linkCount}
+          </span>
+        )}
         {issue.dueDate && (
           <span
             className={cn(
-              "ml-auto hidden items-center gap-0.5 rounded px-1 py-px text-[10px] sm:inline-flex",
+              "ml-auto hidden shrink-0 items-center gap-0.5 whitespace-nowrap rounded px-1 py-px text-[10px] sm:inline-flex",
               isOverdue(issue.dueDate)
                 ? "bg-rose-100 font-medium text-rose-700"
                 : dueSoon
