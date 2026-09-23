@@ -134,7 +134,8 @@ async function runRule(rule: {
           break;
         case "set_priority": {
           if (!action.value) break;
-          const pr = await db.priority.findFirst({ where: { orgId: c.orgId } }).then((list) => (Array.isArray(list) ? list : [list])).then((arr) => arr.find((x) => x && x.name.toLowerCase() === action.value.trim().toLowerCase()));
+          const priorityValue: string = action.value;
+          const pr = await db.priority.findFirst({ where: { orgId: c.orgId } }).then((list) => (Array.isArray(list) ? list : [list])).then((arr) => arr.find((x) => x && x.name.toLowerCase() === priorityValue.trim().toLowerCase()));
           if (pr) {
             await db.issue.update({ where: { id: c.issue.id }, data: { priorityId: pr.id } });
             applied.push(`priority → ${pr.name}`);
@@ -143,8 +144,9 @@ async function runRule(rule: {
         }
         case "transition_to": {
           if (!action.value) break;
+          const statusValue: string = action.value;
           const statuses = await db.status.findMany({ where: { orgId: c.orgId } });
-          const st = statuses.find((x) => x.name.toLowerCase() === action.value.trim().toLowerCase());
+          const st = statuses.find((x) => x.name.toLowerCase() === statusValue.trim().toLowerCase());
           if (st && st.id !== c.issue.statusId) {
             await db.issue.update({ where: { id: c.issue.id }, data: { statusId: st.id } });
             await logActivity({
@@ -158,7 +160,8 @@ async function runRule(rule: {
         }
         case "add_label": {
           if (!action.value) break;
-          let label = (await db.label.findMany({ where: { orgId: c.orgId } })).find((x) => x.name.toLowerCase() === action.value.trim().toLowerCase());
+          const addValue: string = action.value;
+          let label = (await db.label.findMany({ where: { orgId: c.orgId } })).find((x) => x.name.toLowerCase() === addValue.trim().toLowerCase());
           if (!label) label = await db.label.create({ data: { orgId: c.orgId, name: action.value.toLowerCase(), color: "#d97706" } });
           await db.issueLabel.upsert({
             where: { issueId_labelId: { issueId: c.issue.id, labelId: label.id } },
@@ -170,7 +173,8 @@ async function runRule(rule: {
         }
         case "remove_label": {
           if (!action.value) break;
-          const label = (await db.label.findMany({ where: { orgId: c.orgId } })).find((x) => x.name.toLowerCase() === action.value.trim().toLowerCase());
+          const removeValue: string = action.value;
+          const label = (await db.label.findMany({ where: { orgId: c.orgId } })).find((x) => x.name.toLowerCase() === removeValue.trim().toLowerCase());
           if (label) {
             await db.issueLabel.deleteMany({ where: { issueId: c.issue.id, labelId: label.id } });
             applied.push(`label -${label.name}`);

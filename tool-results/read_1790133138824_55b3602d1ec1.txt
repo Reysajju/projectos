@@ -1,0 +1,939 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from "react";
+     4→import ReactMarkdown from "react-markdown";
+     5→import {
+     6→  ArrowLeftRight,
+     7→  AtSign,
+     8→  CalendarClock,
+     9→  CalendarRange,
+    10→  CheckCheck,
+    11→  Copy,
+    12→  GitBranch,
+    13→  Loader2,
+    14→  MessageSquare,
+    15→  Pencil,
+    16→  Plus,
+    17→  Send,
+    18→  Trash2,
+    19→} from "lucide-react";
+    20→import { format } from "date-fns";
+    21→import { toast } from "sonner";
+    22→
+    23→import { api } from "@/lib/api-client";
+    24→import { usePortalStore } from "@/lib/portal-store";
+    25→import type {
+    26→  ActivityDTO,
+    27→  CommentDTO,
+    28→  IssueDTO,
+    29→  IssueDetailPayload,
+    30→  SprintDTO,
+    31→} from "@/lib/portal-types";
+    32→import { cn } from "@/lib/utils";
+    33→import { Avatar } from "./Avatar";
+    34→import { EmptyState } from "./EmptyState";
+    35→import { IssueTypeIcon } from "./IssueTypeIcon";
+    36→import { KeyBadge } from "./KeyBadge";
+    37→import { PriorityIcon } from "./PriorityIcon";
+    38→import { RelativeTime, formatDate } from "./RelativeTime";
+    39→import { CustomFieldValue } from "./CustomFieldValue";
+    40→import { useWorkflowData } from "./use-workflow";
+    41→import { Button } from "@/components/ui/button";
+    42→import {
+    43→  AlertDialog,
+    44→  AlertDialogAction,
+    45→  AlertDialogCancel,
+    46→  AlertDialogContent,
+    47→  AlertDialogDescription,
+    48→  AlertDialogFooter,
+    49→  AlertDialogHeader,
+    50→  AlertDialogTitle,
+    51→} from "@/components/ui/alert-dialog";
+    52→import { Input } from "@/components/ui/input";
+    53→import { Label } from "@/components/ui/label";
+    54→import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+    55→import { Calendar } from "@/components/ui/calendar";
+    56→import {
+    57→  Select,
+    58→  SelectContent,
+    59→  SelectItem,
+    60→  SelectTrigger,
+    61→  SelectValue,
+    62→} from "@/components/ui/select";
+    63→import {
+    64→  Sheet,
+    65→  SheetContent,
+    66→  SheetDescription,
+    67→  SheetHeader,
+    68→  SheetTitle,
+    69→} from "@/components/ui/sheet";
+    70→import { Separator } from "@/components/ui/separator";
+    71→import { Skeleton } from "@/components/ui/skeleton";
+    72→import { Textarea } from "@/components/ui/textarea";
+    73→
+    74→const ACTIVITY_ICONS: Record<string, typeof MessageSquare> = {
+    75→  "issue.created": Plus,
+    76→  "issue.updated": Pencil,
+    77→  "issue.status_changed": ArrowLeftRight,
+    78→  "issue.assigned": AtSign,
+    79→  "comment.created": MessageSquare,
+    80→};
+    81→
+    82→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+    83→  return (
+    84→    <div className="space-y-1.5">
+    85→      <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{label}</Label>
+    86→      {children}
+    87→    </div>
+    88→  );
+    89→}
+    90→
+    91→export function IssuePanel() {
+    92→  const openIssueId = usePortalStore((s) => s.openIssueId);
+    93→  const setOpenIssue = usePortalStore((s) => s.setOpenIssue);
+    94→  const workspace = usePortalStore((s) => s.workspace);
+    95→  const me = usePortalStore((s) => s.me);
+    96→  const role = usePortalStore((s) => s.role);
+    97→  const bumpProjectData = usePortalStore((s) => s.bumpProjectData);
+    98→  const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
+    99→
+   100→  const [detail, setDetail] = useState<IssueDetailPayload | null>(null);
+   101→  const [sprints, setSprints] = useState<SprintDTO[]>([]);
+   102→  const [loading, setLoading] = useState(false);
+   103→
+   104→  // editing state
+   105→  const [editingSummary, setEditingSummary] = useState(false);
+   106→  const [summaryDraft, setSummaryDraft] = useState("");
+   107→  const [editingDesc, setEditingDesc] = useState(false);
+   108→  const [descDraft, setDescDraft] = useState("");
+   109→  const [commentDraft, setCommentDraft] = useState("");
+   110→  const [postingComment, setPostingComment] = useState(false);
+   111→  const [subtaskDraft, setSubtaskDraft] = useState("");
+   112→  const [confirmDelete, setConfirmDelete] = useState(false);
+   113→  const [dueOpen, setDueOpen] = useState(false);
+   114→  const [startOpen, setStartOpen] = useState(false);
+   115→
+   116→  const issue = detail?.issue ?? null;
+   117→  const members = useMemo(() => workspace?.members ?? [], [workspace]);
+   118→  const types = useMemo(() => workspace?.issueTypes ?? [], [workspace]);
+   119→  const statuses = useMemo(
+   120→    () => [...(workspace?.statuses ?? [])].sort((a, b) => a.order - b.order),
+   121→    [workspace]
+   122→  );
+   123→  const priorities = useMemo(
+   124→    () => [...(workspace?.priorities ?? [])].sort((a, b) => a.order - b.order),
+   125→    [workspace]
+   126→  );
+   127→  const labels = useMemo(() => workspace?.labels ?? [], [workspace]);
+   128→  const customFieldDefs = useMemo(() => workspace?.customFields ?? [], [workspace]);
+   129→
+   130→  const load = useCallback(async (id: string) => {
+   131→    setLoading(true);
+   132→    try {
+   133→      const d = await api.getIssue(id);
+   134→      setDetail(d);
+   135→      // Sprint list comes from the project detail (best-effort, non-fatal).
+   136→      try {
+   137→        const p = await api.getProject(d.issue.projectId);
+   138→        setSprints(p.sprints);
+   139→      } catch {
+   140→        setSprints([]);
+   141→      }
+   142→    } catch (err) {
+   143→      toast.error(err instanceof Error ? err.message : "Failed to load issue");
+   144→      setOpenIssue(null);
+   145→    } finally {
+   146→      setLoading(false);
+   147→    }
+   148→  }, [setOpenIssue]);
+   149→
+   150→  useEffect(() => {
+   151→    if (!openIssueId) {
+   152→      setDetail(null);
+   153→      return;
+   154→    }
+   155→    setEditingSummary(false);
+   156→    setEditingDesc(false);
+   157→    setCommentDraft("");
+   158→    setSubtaskDraft("");
+   159→    void load(openIssueId);
+   160→  }, [openIssueId, load]);
+   161→
+   162→  async function patch(body: Record<string, unknown>, opts?: { silent?: boolean }) {
+   163→    if (!issue) return;
+   164→    try {
+   165→      const updated = await api.patchIssue(issue.id, body);
+   166→      setDetail((d) => (d ? { ...d, issue: updated } : d));
+   167→      bumpProjectData();
+   168→      if (!opts?.silent) toast.success(`${issue.key} updated`);
+   169→    } catch (err) {
+   170→      toast.error(err instanceof Error ? err.message : "Failed to update issue");
+   171→      if (openIssueId) void load(openIssueId);
+   172→    }
+   173→  }
+   174→
+   175→  async function saveSummary() {
+   176→    if (!issue) return;
+   177→    const next = summaryDraft.trim();
+   178→    setEditingSummary(false);
+   179→    if (!next || next === issue.summary) return;
+   180→    await patch({ summary: next });
+   181→  }
+   182→
+   183→  async function saveDescription() {
+   184→    if (!issue) return;
+   185→    setEditingDesc(false);
+   186→    const next = descDraft.trim();
+   187→    if (next === (issue.description ?? "")) return;
+   188→    await patch({ description: next || null });
+   189→  }
+   190→
+   191→  async function postComment() {
+   192→    if (!issue || !commentDraft.trim()) return;
+   193→    setPostingComment(true);
+   194→    try {
+   195→      const comment = await api.addComment(issue.id, { body: commentDraft.trim() });
+   196→      setDetail((d) => (d ? { ...d, comments: [...d.comments, comment] } : d));
+   197→      setCommentDraft("");
+   198→      bumpProjectData();
+   199→      toast.success("Comment added");
+   200→    } catch (err) {
+   201→      toast.error(err instanceof Error ? err.message : "Failed to add comment");
+   202→    } finally {
+   203→      setPostingComment(false);
+   204→    }
+   205→  }
+   206→
+   207→  async function deleteComment(id: string) {
+   208→    try {
+   209→      await api.deleteComment(id);
+   210→      setDetail((d) => (d ? { ...d, comments: d.comments.filter((c) => c.id !== id) } : d));
+   211→      bumpProjectData();
+   212→      toast.success("Comment deleted");
+   213→    } catch (err) {
+   214→      toast.error(err instanceof Error ? err.message : "Failed to delete comment");
+   215→    }
+   216→  }
+   217→
+   218→  async function toggleLabel(labelId: string) {
+   219→    if (!issue) return;
+   220→    const has = issue.labels.some((l) => l.id === labelId);
+   221→    const next = has ? issue.labels.filter((l) => l.id !== labelId).map((l) => l.id) : [...issue.labels.map((l) => l.id), labelId];
+   222→    await patch({ labelIds: next }, { silent: true });
+   223→  }
+   224→
+   225→  async function addSubtask() {
+   226→    if (!issue || !subtaskDraft.trim()) return;
+   227→    const subType = types.find((t) => t.name.toLowerCase().includes("sub")) ?? types[types.length - 1];
+   228→    try {
+   229→      const created = await api.createIssue({
+   230→        projectId: issue.projectId,
+   231→        typeId: subType.id,
+   232→        summary: subtaskDraft.trim(),
+   233→        parentId: issue.id,
+   234→      });
+   235→      setDetail((d) =>
+   236→        d ? { ...d, subtasks: [...d.subtasks, created], issue: { ...d.issue, subtaskCount: d.issue.subtaskCount + 1 } } : d
+   237→      );
+   238→      setSubtaskDraft("");
+   239→      bumpProjectData();
+   240→      toast.success(`Subtask ${created.key} created`);
+   241→    } catch (err) {
+   242→      toast.error(err instanceof Error ? err.message : "Failed to create subtask");
+   243→    }
+   244→  }
+   245→
+   246→  async function deleteIssue() {
+   247→    if (!issue) return;
+   248→    try {
+   249→      await api.deleteIssue(issue.id);
+   250→      toast.success(`${issue.key} deleted`);
+   251→      setConfirmDelete(false);
+   252→      setOpenIssue(null);
+   253→      bumpProjectData();
+   254→      void refreshWorkspace();
+   255→    } catch (err) {
+   256→      toast.error(err instanceof Error ? err.message : "Failed to delete issue");
+   257→    }
+   258→  }
+   259→
+   260→  function copyIssueLink() {
+   261→    if (!issue) return;
+   262→    const url = `${window.location.origin}/?issue=${issue.key}`;
+   263→    void navigator.clipboard
+   264→      .writeText(url)
+   265→      .then(() => toast.success("Issue link copied"))
+   266→      .catch(() => toast.error("Couldn't copy link"));
+   267→  }
+   268→
+   269→  const canDelete = role === "ADMIN" || role === "MANAGER";
+   270→  const subtaskType = types.find((t) => t.name.toLowerCase().includes("sub")) ?? types[types.length - 1];
+   271→
+   272→  return (
+   273→    <Sheet open={openIssueId !== null} onOpenChange={(o) => !o && setOpenIssue(null)}>
+   274→      <SheetContent
+   275→        side="right"
+   276→        className="w-full gap-0 overflow-hidden p-0 sm:max-w-[560px] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5"
+   277→      >
+   278→        {loading && !issue ? (
+   279→          <div className="space-y-4 p-6">
+   280→            <Skeleton className="h-6 w-40" />
+   281→            <Skeleton className="h-8 w-full" />
+   282→            <Skeleton className="h-40 w-full" />
+   283→          </div>
+   284→        ) : issue ? (
+   285→          <>
+   286→            <SheetHeader className="border-b border-border px-5 py-3 pr-14">
+   287→              <div className="flex items-center gap-2">
+   288→                <SheetTitle className="flex items-center gap-2 text-sm">
+   289→                  <KeyBadge>{issue.key}</KeyBadge>
+   290→                  <span className="text-xs font-normal text-muted-foreground/80">{issue.projectName}</span>
+   291→                </SheetTitle>
+   292→                <div className="ml-auto flex items-center gap-1">
+   293→                  <Button
+   294→                    variant="ghost"
+   295→                    size="icon"
+   296→                    className="size-7"
+   297→                    aria-label="Copy issue link"
+   298→                    onClick={copyIssueLink}
+   299→                  >
+   300→                    <Copy className="size-3.5" aria-hidden />
+   301→                  </Button>
+   302→                  <Select
+   303→                    value={issue.typeId}
+   304→                    onValueChange={(v) => {
+   305→                      void patch({ typeId: v }, { silent: true });
+   306→                    }}
+   307→                  >
+   308→                    <SelectTrigger
+   309→                      size="sm"
+   310→                      className="h-7 w-[120px] border-none bg-muted shadow-none"
+   311→                      aria-label="Issue type"
+   312→                    >
+   313→                      <span className="flex items-center gap-1.5 text-xs">
+   314→                        <IssueTypeIcon type={issue.type} size={12} />
+   315→                        {issue.type.name}
+   316→                      </span>
+   317→                    </SelectTrigger>
+   318→                    <SelectContent>
+   319→                      {types.map((t) => (
+   320→                        <SelectItem key={t.id} value={t.id}>
+   321→                          <span className="flex items-center gap-2">
+   322→                            <IssueTypeIcon type={t} size={12} /> {t.name}
+   323→                          </span>
+   324→                        </SelectItem>
+   325→                      ))}
+   326→                    </SelectContent>
+   327→                  </Select>
+   328→                </div>
+   329→              </div>
+   330→            </SheetHeader>
+   331→
+   332→            <div className="flex-1 overflow-y-auto px-5 py-4">
+   333→              {/* Summary */}
+   334→              {editingSummary ? (
+   335→                <Input
+   336→                  autoFocus
+   337→                  value={summaryDraft}
+   338→                  onChange={(e) => setSummaryDraft(e.target.value)}
+   339→                  onBlur={() => void saveSummary()}
+   340→                  onKeyDown={(e) => {
+   341→                    if (e.key === "Enter") void saveSummary();
+   342→                    if (e.key === "Escape") setEditingSummary(false);
+   343→                  }}
+   344→                  aria-label="Issue summary"
+   345→                  className="text-base font-semibold"
+   346→                />
+   347→              ) : (
+   348→                <div
+   349→                  className="group flex cursor-text items-start gap-2 rounded-md px-2 py-1 -mx-2 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   350→                  role="button"
+   351→                  tabIndex={0}
+   352→                  aria-label="Edit summary"
+   353→                  onClick={() => {
+   354→                    setSummaryDraft(issue.summary);
+   355→                    setEditingSummary(true);
+   356→                  }}
+   357→                  onKeyDown={(e) => {
+   358→                    if (e.key === "Enter") {
+   359→                      setSummaryDraft(issue.summary);
+   360→                      setEditingSummary(true);
+   361→                    }
+   362→                  }}
+   363→                >
+   364→                  <p className="flex-1 text-base font-semibold leading-snug text-foreground">{issue.summary}</p>
+   365→                  <Pencil className="mt-1 size-3.5 shrink-0 text-stone-300 transition-colors group-hover:text-muted-foreground" aria-hidden />
+   366→                </div>
+   367→              )}
+   368→
+   369→              {/* Description */}
+   370→              <section className="mt-4" aria-label="Description">
+   371→                <div className="flex items-center justify-between">
+   372→                  <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Description</Label>
+   373→                  {!editingDesc && (
+   374→                    <button
+   375→                      type="button"
+   376→                      className="text-xs text-muted-foreground/80 underline-offset-2 hover:text-amber-700 hover:underline focus-visible:outline-none"
+   377→                      onClick={() => {
+   378→                        setDescDraft(issue.description ?? "");
+   379→                        setEditingDesc(true);
+   380→                      }}
+   381→                    >
+   382→                      Edit
+   383→                    </button>
+   384→                  )}
+   385→                </div>
+   386→                {editingDesc ? (
+   387→                  <div className="mt-2 space-y-2">
+   388→                    <Textarea
+   389→                      autoFocus
+   390→                      rows={5}
+   391→                      value={descDraft}
+   392→                      onChange={(e) => setDescDraft(e.target.value)}
+   393→                      placeholder="Add a description… markdown supported (**bold**, lists, `code`)"
+   394→                      aria-label="Description editor"
+   395→                    />
+   396→                    <div className="flex gap-2">
+   397→                      <Button size="sm" className="h-7 bg-amber-600 text-white hover:bg-amber-700" onClick={() => void saveDescription()}>
+   398→                        Save
+   399→                      </Button>
+   400→                      <Button size="sm" variant="outline" className="h-7" onClick={() => setEditingDesc(false)}>
+   401→                        Cancel
+   402→                      </Button>
+   403→                    </div>
+   404→                  </div>
+   405→                ) : issue.description ? (
+   406→                  <div className="prose-sm mt-1.5 max-w-none rounded-md border border-border bg-muted/50/50 p-3 text-sm leading-relaxed text-foreground/90 [&_a]:text-amber-700 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1">
+   407→                    <ReactMarkdown>{issue.description}</ReactMarkdown>
+   408→                  </div>
+   409→                ) : (
+   410→                  <button
+   411→                    type="button"
+   412→                    onClick={() => {
+   413→                      setDescDraft("");
+   414→                      setEditingDesc(true);
+   415→                    }}
+   416→                    className="mt-1.5 w-full rounded-md border border-dashed border-border px-3 py-4 text-left text-xs text-muted-foreground/80 hover:border-stone-400 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   417→                  >
+   418→                    Add a description…
+   419→                  </button>
+   420→                )}
+   421→              </section>
+   422→
+   423→              {/* Properties */}
+   424→              <section className="mt-5" aria-label="Properties">
+   425→                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Properties</Label>
+   426→                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border p-3">
+   427→                  <Field label="Status">
+   428→                    <WorkflowStatusSelect issue={issue} statuses={statuses} onStatusChange={(statusId) => void patch({ statusId }, { silent: true })} />
+   429→                  </Field>
+   430→
+   431→                  <Field label="Assignee">
+   432→                    <Select
+   433→                      value={issue.assigneeId ?? "none"}
+   434→                      onValueChange={(v) => void patch({ assigneeId: v === "none" ? null : v }, { silent: true })}
+   435→                    >
+   436→                      <SelectTrigger size="sm" className="w-full" aria-label="Assignee">
+   437→                        {issue.assignee ? (
+   438→                          <span className="flex items-center gap-1.5">
+   439→                            <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="xs" />
+   440→                            <span className="truncate">{issue.assignee.name}</span>
+   441→                          </span>
+   442→                        ) : (
+   443→                          "Unassigned"
+   444→                        )}
+   445→                      </SelectTrigger>
+   446→                      <SelectContent>
+   447→                        <SelectItem value="none">Unassigned</SelectItem>
+   448→                        {members.map((m) => (
+   449→                          <SelectItem key={m.id} value={m.id}>
+   450→                            <span className="flex items-center gap-2">
+   451→                              <Avatar name={m.name} color={m.avatarColor} size="xs" />
+   452→                              {m.name}
+   453→                            </span>
+   454→                          </SelectItem>
+   455→                        ))}
+   456→                      </SelectContent>
+   457→                    </Select>
+   458→                  </Field>
+   459→
+   460→                  <Field label="Priority">
+   461→                    <Select
+   462→                      value={issue.priorityId ?? "none"}
+   463→                      onValueChange={(v) => void patch({ priorityId: v === "none" ? null : v }, { silent: true })}
+   464→                    >
+   465→                      <SelectTrigger size="sm" className="w-full" aria-label="Priority">
+   466→                        {issue.priority ? (
+   467→                          <span className="flex items-center gap-1.5">
+   468→                            <PriorityIcon priority={issue.priority} size={12} />
+   469→                            {issue.priority.name}
+   470→                          </span>
+   471→                        ) : (
+   472→                          "None"
+   473→                        )}
+   474→                      </SelectTrigger>
+   475→                      <SelectContent>
+   476→                        <SelectItem value="none">None</SelectItem>
+   477→                        {priorities.map((p) => (
+   478→                          <SelectItem key={p.id} value={p.id}>
+   479→                            <span className="flex items-center gap-2">
+   480→                              <PriorityIcon priority={p} size={12} />
+   481→                              {p.name}
+   482→                            </span>
+   483→                          </SelectItem>
+   484→                        ))}
+   485→                      </SelectContent>
+   486→                    </Select>
+   487→                  </Field>
+   488→
+   489→                  <Field label="Sprint">
+   490→                    <Select
+   491→                      value={issue.sprintId ?? "none"}
+   492→                      onValueChange={(v) => void patch({ sprintId: v === "none" ? null : v }, { silent: true })}
+   493→                    >
+   494→                      <SelectTrigger size="sm" className="w-full" aria-label="Sprint">
+   495→                        {issue.sprintId ? sprints.find((s) => s.id === issue.sprintId)?.name ?? "Sprint" : "Backlog"}
+   496→                      </SelectTrigger>
+   497→                      <SelectContent>
+   498→                        <SelectItem value="none">Backlog (no sprint)</SelectItem>
+   499→                        {sprints.map((s) => (
+   500→                          <SelectItem key={s.id} value={s.id}>
+   501→                            {s.name}
+   502→                          </SelectItem>
+   503→                        ))}
+   504→                      </SelectContent>
+   505→                    </Select>
+   506→                  </Field>
+   507→
+   508→                  <Field label="Story points">
+   509→                    <Input
+   510→                      type="number"
+   511→                      min={0}
+   512→                      className="h-8"
+   513→                      aria-label="Story points"
+   514→                      defaultValue={issue.storyPoints ?? ""}
+   515→                      key={`pts-${issue.id}-${issue.storyPoints}`}
+   516→                      onBlur={(e) => {
+   517→                        const v = e.target.value === "" ? null : Math.max(0, Number(e.target.value));
+   518→                        const next = Number.isFinite(v as number) ? v : null;
+   519→                        if (next !== issue.storyPoints) void patch({ storyPoints: next }, { silent: true });
+   520→                      }}
+   521→                    />
+   522→                  </Field>
+   523→
+   524→                  <Field label="Start date">
+   525→                    <div className="flex items-center gap-1">
+   526→                      <Popover open={startOpen} onOpenChange={setStartOpen}>
+   527→                        <PopoverTrigger asChild>
+   528→                          <Button
+   529→                            type="button"
+   530→                            variant="outline"
+   531→                            size="sm"
+   532→                            className={cn("h-8 flex-1 justify-start font-normal", !issue.startDate && "text-muted-foreground/80")}
+   533→                            aria-label="Start date"
+   534→                          >
+   535→                            <CalendarRange className="size-3.5 text-muted-foreground/80" aria-hidden />
+   536→                            {issue.startDate ? formatDate(issue.startDate) : "Set date"}
+   537→                          </Button>
+   538→                        </PopoverTrigger>
+   539→                        <PopoverContent align="start" className="w-auto p-0">
+   540→                          <Calendar
+   541→                            mode="single"
+   542→                            selected={issue.startDate ? new Date(issue.startDate) : undefined}
+   543→                            disabled={issue.dueDate ? { after: new Date(issue.dueDate) } : undefined}
+   544→                            onSelect={(d) => {
+   545→                              setStartOpen(false);
+   546→                              void patch({ startDate: d ? d.toISOString() : null }, { silent: true });
+   547→                            }}
+   548→                          />
+   549→                        </PopoverContent>
+   550→                      </Popover>
+   551→                      {issue.startDate && (
+   552→                        <Button
+   553→                          variant="ghost"
+   554→                          size="icon"
+   555→                          className="size-8 shrink-0"
+   556→                          aria-label="Clear start date"
+   557→                          onClick={() => void patch({ startDate: null }, { silent: true })}
+   558→                        >
+   559→                          <Trash2 className="size-3.5" aria-hidden />
+   560→                        </Button>
+   561→                      )}
+   562→                    </div>
+   563→                  </Field>
+   564→
+   565→                  <Field label="Due date">
+   566→                    <div className="flex items-center gap-1">
+   567→                      <Popover open={dueOpen} onOpenChange={setDueOpen}>
+   568→                        <PopoverTrigger asChild>
+   569→                          <Button
+   570→                            type="button"
+   571→                            variant="outline"
+   572→                            size="sm"
+   573→                            className={cn("h-8 flex-1 justify-start font-normal", !issue.dueDate && "text-muted-foreground/80")}
+   574→                            aria-label="Due date"
+   575→                          >
+   576→                            <CalendarClock className="size-3.5 text-muted-foreground/80" aria-hidden />
+   577→                            {issue.dueDate ? formatDate(issue.dueDate) : "Set date"}
+   578→                          </Button>
+   579→                        </PopoverTrigger>
+   580→                        <PopoverContent align="start" className="w-auto p-0">
+   581→                          <Calendar
+   582→                            mode="single"
+   583→                            selected={issue.dueDate ? new Date(issue.dueDate) : undefined}
+   584→                            onSelect={(d) => {
+   585→                              setDueOpen(false);
+   586→                              void patch({ dueDate: d ? d.toISOString() : null }, { silent: true });
+   587→                            }}
+   588→                          />
+   589→                        </PopoverContent>
+   590→                      </Popover>
+   591→                      {issue.dueDate && (
+   592→                        <Button
+   593→                          variant="ghost"
+   594→                          size="icon"
+   595→                          className="size-8 shrink-0"
+   596→                          aria-label="Clear due date"
+   597→                          onClick={() => void patch({ dueDate: null }, { silent: true })}
+   598→                        >
+   599→                          <Trash2 className="size-3.5" aria-hidden />
+   600→                        </Button>
+   601→                      )}
+   602→                    </div>
+   603→                  </Field>
+   604→
+   605→                  <Field label="Estimate (h)">
+   606→                    <Input
+   607→                      type="number"
+   608→                      min={0}
+   609→                      step="0.5"
+   610→                      className="h-8"
+   611→                      aria-label="Estimate hours"
+   612→                      defaultValue={issue.estimateHours ?? ""}
+   613→                      key={`est-${issue.id}-${issue.estimateHours}`}
+   614→                      onBlur={(e) => {
+   615→                        const v = e.target.value === "" ? null : Math.max(0, Number(e.target.value));
+   616→                        const next = Number.isFinite(v as number) ? v : null;
+   617→                        if (next !== issue.estimateHours) void patch({ estimateHours: next }, { silent: true });
+   618→                      }}
+   619→                    />
+   620→                  </Field>
+   621→
+   622→                  <Field label="Remaining (h)">
+   623→                    <Input
+   624→                      type="number"
+   625→                      min={0}
+   626→                      step="0.5"
+   627→                      className="h-8"
+   628→                      aria-label="Remaining hours"
+   629→                      defaultValue={issue.remainingHours ?? ""}
+   630→                      key={`rem-${issue.id}-${issue.remainingHours}`}
+   631→                      onBlur={(e) => {
+   632→                        const v = e.target.value === "" ? null : Math.max(0, Number(e.target.value));
+   633→                        const next = Number.isFinite(v as number) ? v : null;
+   634→                        if (next !== issue.remainingHours) void patch({ remainingHours: next }, { silent: true });
+   635→                      }}
+   636→                    />
+   637→                  </Field>
+   638→
+   639→                  <div className="col-span-2">
+   640→                    <Field label="Labels">
+   641→                      <div className="flex flex-wrap gap-1.5">
+   642→                        {labels.map((l) => {
+   643→                          const active = issue.labels.some((il) => il.id === l.id);
+   644→                          return (
+   645→                            <button
+   646→                              key={l.id}
+   647→                              type="button"
+   648→                              aria-pressed={active}
+   649→                              onClick={() => void toggleLabel(l.id)}
+   650→                              className={cn(
+   651→                                "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+   652→                                active ? "border-transparent" : "border-border bg-card text-muted-foreground hover:border-border"
+   653→                              )}
+   654→                              style={active ? { backgroundColor: `${l.color}22`, color: l.color } : undefined}
+   655→                            >
+   656→                              {l.name}
+   657→                            </button>
+   658→                          );
+   659→                        })}
+   660→                        {labels.length === 0 && <span className="text-xs text-muted-foreground/80">No labels in workspace</span>}
+   661→                      </div>
+   662→                    </Field>
+   663→                  </div>
+   664→
+   665→                  {customFieldDefs.length > 0 && (
+   666→                    <div className="col-span-2">
+   667→                      <Field label="Custom fields">
+   668→                        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+   669→                          {customFieldDefs.map((def) => (
+   670→                            <CustomFieldValue
+   671→                              key={def.id}
+   672→                              field={def}
+   673→                              value={issue.customFields?.[def.id] ?? null}
+   674→                              onChange={(value) => {
+   675→                                if (!issue) return;
+   676→                                const next = { ...(issue.customFields ?? {}) };
+   677→                                if (value == null || value === "") delete next[def.id];
+   678→                                else next[def.id] = value;
+   679→                                void patch({ customFields: next }, { silent: true });
+   680→                              }}
+   681→                            />
+   682→                          ))}
+   683→                        </div>
+   684→                      </Field>
+   685→                    </div>
+   686→                  )}
+   687→
+   688→                  <div className="col-span-2 grid grid-cols-2 gap-x-4 text-xs text-muted-foreground/80">
+   689→                    <span>Reporter: {issue.reporter?.name ?? "—"}</span>
+   690→                    <span>Created: {formatDate(issue.createdAt)}</span>
+   691→                  </div>
+   692→                </div>
+   693→              </section>
+   694→
+   695→              {/* Subtasks */}
+   696→              <section className="mt-5" aria-label="Subtasks">
+   697→                <div className="flex items-center gap-2">
+   698→                  <GitBranch className="size-3.5 text-muted-foreground/80" aria-hidden />
+   699→                  <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
+   700→                    Subtasks {detail && detail.subtasks.length > 0 && `(${detail.subtasks.filter((s) => s.status.category === "DONE").length}/${detail.subtasks.length} done)`}
+   701→                  </Label>
+   702→                </div>
+   703→                {detail && detail.subtasks.length > 0 && (
+   704→                  <ul className="mt-2 space-y-1">
+   705→                    {detail.subtasks.map((st) => (
+   706→                      <li key={st.id}>
+   707→                        <button
+   708→                          type="button"
+   709→                          onClick={() => setOpenIssue(st.id)}
+   710→                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   711→                        >
+   712→                          <IssueTypeIcon type={st.type} size={12} />
+   713→                          <KeyBadge>{st.key}</KeyBadge>
+   714→                          <span className={cn("min-w-0 flex-1 truncate", st.status.category === "DONE" && "text-muted-foreground/80 line-through")}>
+   715→                            {st.summary}
+   716→                          </span>
+   717→                          <span className="text-[10px] text-muted-foreground/80">{st.status.name}</span>
+   718→                        </button>
+   719→                      </li>
+   720→                    ))}
+   721→                  </ul>
+   722→                )}
+   723→                <form
+   724→                  className="mt-2 flex items-center gap-2"
+   725→                  onSubmit={(e) => {
+   726→                    e.preventDefault();
+   727→                    void addSubtask();
+   728→                  }}
+   729→                >
+   730→                  {subtaskType && <IssueTypeIcon type={subtaskType} size={12} />}
+   731→                  <Input
+   732→                    className="h-8"
+   733→                    placeholder="Add a subtask and press Enter…"
+   734→                    aria-label="New subtask summary"
+   735→                    value={subtaskDraft}
+   736→                    onChange={(e) => setSubtaskDraft(e.target.value)}
+   737→                  />
+   738→                  <Button type="submit" size="icon" variant="ghost" className="size-8 shrink-0" aria-label="Add subtask" disabled={!subtaskDraft.trim()}>
+   739→                    <Plus className="size-4" aria-hidden />
+   740→                  </Button>
+   741→                </form>
+   742→              </section>
+   743→
+   744→              <Separator className="my-5" />
+   745→
+   746→              {/* Comments */}
+   747→              <section aria-label="Comments">
+   748→                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
+   749→                  Comments {detail ? `(${detail.comments.length})` : ""}
+   750→                </Label>
+   751→                <ul className="mt-3 space-y-4">
+   752→                  {detail?.comments.map((c: CommentDTO) => (
+   753→                    <li key={c.id} className="flex gap-3">
+   754→                      <Avatar name={c.author.name} color={c.author.avatarColor} size="md" />
+   755→                      <div className="min-w-0 flex-1">
+   756→                        <div className="flex items-center gap-2">
+   757→                          <span className="text-sm font-semibold text-foreground">{c.author.name}</span>
+   758→                          <RelativeTime date={c.createdAt} className="text-[11px] text-muted-foreground/80" />
+   759→                          {(me?.id === c.author.id || role === "ADMIN") && (
+   760→                            <button
+   761→                              type="button"
+   762→                              aria-label="Delete comment"
+   763→                              className="ml-auto rounded p-1 text-stone-300 hover:bg-rose-500/100/10 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
+   764→                              onClick={() => void deleteComment(c.id)}
+   765→                            >
+   766→                              <Trash2 className="size-3.5" aria-hidden />
+   767→                            </button>
+   768→                          )}
+   769→                        </div>
+   770→                        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{c.body}</p>
+   771→                      </div>
+   772→                    </li>
+   773→                  ))}
+   774→                  {detail && detail.comments.length === 0 && (
+   775→                    <li className="text-xs text-muted-foreground/80">No comments yet.</li>
+   776→                  )}
+   777→                </ul>
+   778→
+   779→                <form
+   780→                  className="mt-4"
+   781→                  onSubmit={(e) => {
+   782→                    e.preventDefault();
+   783→                    void postComment();
+   784→                  }}
+   785→                >
+   786→                  <div className="flex items-start gap-2">
+   787→                    {me && <Avatar name={me.name} color={me.avatarColor} size="md" />}
+   788→                    <div className="flex-1 space-y-2">
+   789→                      <Textarea
+   790→                        rows={2}
+   791→                        placeholder="Add a comment… use @Full Name to mention someone"
+   792→                        aria-label="New comment"
+   793→                        value={commentDraft}
+   794→                        onChange={(e) => setCommentDraft(e.target.value)}
+   795→                      />
+   796→                      <div className="flex justify-end">
+   797→                        <Button type="submit" size="sm" className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700" disabled={!commentDraft.trim() || postingComment}>
+   798→                          {postingComment ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Send className="size-3.5" aria-hidden />}
+   799→                          Comment
+   800→                        </Button>
+   801→                      </div>
+   802→                    </div>
+   803→                  </div>
+   804→                </form>
+   805→              </section>
+   806→
+   807→              <Separator className="my-5" />
+   808→
+   809→              {/* Activity */}
+   810→              <section aria-label="Activity">
+   811→                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Activity</Label>
+   812→                {detail && detail.activity.length === 0 ? (
+   813→                  <p className="mt-2 text-xs text-muted-foreground/80">No activity recorded yet.</p>
+   814→                ) : (
+   815→                  <ol className="mt-3 space-y-0">
+   816→                    {detail?.activity.map((a: ActivityDTO) => {
+   817→                      const Icon = ACTIVITY_ICONS[a.type] ?? CheckCheck;
+   818→                      return (
+   819→                        <li key={a.id} className="relative flex gap-3 pb-4 last:pb-0">
+   820→                          {detail && detail.activity.indexOf(a) < detail.activity.length - 1 && (
+   821→                            <span aria-hidden className="absolute left-[11px] top-6 h-[calc(100%-1rem)] w-px bg-muted" />
+   822→                          )}
+   823→                          <span className="z-10 mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted ring-2 ring-white">
+   824→                            <Icon className="size-3 text-muted-foreground" aria-hidden />
+   825→                          </span>
+   826→                          <div className="min-w-0 flex-1 text-sm">
+   827→                            <span className="font-medium text-foreground">{a.user.name}</span>{" "}
+   828→                            <span className="text-muted-foreground">
+   829→                              {a.field
+   830→                                ? `changed ${a.field}`
+   831→                                : a.type.replace("issue.", "").replace(/_/g, " ")}
+   832→                            </span>
+   833→                            {a.oldValue != null && a.newValue != null && (
+   834→                              <span className="text-muted-foreground">
+   835→                                : <span className="text-muted-foreground">{a.oldValue}</span> <span aria-hidden>→</span>{" "}
+   836→                                <span className="font-medium text-foreground/90">{a.newValue}</span>
+   837→                              </span>
+   838→                            )}
+   839→                            <div className="mt-0.5">
+   840→                              <RelativeTime date={a.createdAt} className="text-[11px] text-muted-foreground/80" />
+   841→                            </div>
+   842→                          </div>
+   843→                        </li>
+   844→                      );
+   845→                    })}
+   846→                  </ol>
+   847→                )}
+   848→              </section>
+   849→            </div>
+   850→
+   851→            {/* Footer actions */}
+   852→            <div className="flex items-center justify-between border-t border-border bg-muted/50 px-5 py-3">
+   853→              <Button
+   854→                variant="ghost"
+   855→                size="sm"
+   856→                className="gap-1.5 text-rose-600 hover:bg-rose-500/100/10 hover:text-rose-700"
+   857→                disabled={!canDelete}
+   858→                title={canDelete ? "Delete issue" : "Only ADMIN/MANAGER can delete issues"}
+   859→                onClick={() => setConfirmDelete(true)}
+   860→              >
+   861→                <Trash2 className="size-3.5" aria-hidden /> Delete
+   862→              </Button>
+   863→              <span className="text-[11px] text-muted-foreground/80">
+   864→                Updated <RelativeTime date={issue.updatedAt} />
+   865→              </span>
+   866→            </div>
+   867→
+   868→            <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+   869→              <AlertDialogContent>
+   870→                <AlertDialogHeader>
+   871→                  <AlertDialogTitle>Delete {issue.key}?</AlertDialogTitle>
+   872→                  <AlertDialogDescription>
+   873→                    This permanently deletes the issue{issue.subtaskCount > 0 ? ` and its ${issue.subtaskCount} subtask${issue.subtaskCount === 1 ? "" : "s"}` : ""}, comments and history.
+   874→                  </AlertDialogDescription>
+   875→                </AlertDialogHeader>
+   876→                <AlertDialogFooter>
+   877→                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+   878→                  <AlertDialogAction className="bg-rose-600 text-white hover:bg-rose-700" onClick={(e) => { e.preventDefault(); void deleteIssue(); }}>
+   879→                    Delete issue
+   880→                  </AlertDialogAction>
+   881→                </AlertDialogFooter>
+   882→              </AlertDialogContent>
+   883→            </AlertDialog>
+   884→          </>
+   885→        ) : (
+   886→          <div className="flex flex-1 items-center justify-center">
+   887→            <EmptyState icon={GitBranch} title="No issue selected" hint="Pick an issue from a board, table or search." />
+   888→          </div>
+   889→        )}
+   890→      </SheetContent>
+   891→    </Sheet>
+   892→  );
+   893→}
+   894→
+   895→// ─── Workflow-aware status select ───────────────────────────────
+   896→// When the org runs a restricted workflow, statuses that are not
+   897→// reachable from the issue's current status are shown but disabled.
+   898→
+   899→function WorkflowStatusSelect({
+   900→  issue,
+   901→  statuses,
+   902→  onStatusChange,
+   903→}: {
+   904→  issue: IssueDTO;
+   905→  statuses: StatusDTO[];
+   906→  onStatusChange: (statusId: string) => void;
+   907→}) {
+   908→  const { canMove } = useWorkflowData();
+   909→  return (
+   910→    <Select
+   911→      value={issue.statusId}
+   912→      onValueChange={onStatusChange}
+   913→    >
+   914→      <SelectTrigger size="sm" className="w-full" aria-label="Status">
+   915→        <span className="flex items-center gap-1.5">
+   916→          <span className="size-2 rounded-full" style={{ backgroundColor: issue.status.color }} aria-hidden />
+   917→          {issue.status.name}
+   918→        </span>
+   919→      </SelectTrigger>
+   920→      <SelectContent>
+   921→        {statuses.map((s) => {
+   922→          const allowed = canMove(issue.statusId, s.id);
+   923→          return (
+   924→            <SelectItem key={s.id} value={s.id} disabled={!allowed}>
+   925→              <span className="flex items-center gap-2">
+   926→                <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+   927→                {s.name}
+   928→                {!allowed && (
+   929→                  <span className="text-[10px] text-muted-foreground/70">(workflow)</span>
+   930→                )}
+   931→              </span>
+   932→            </SelectItem>
+   933→          );
+   934→        })}
+   935→      </SelectContent>
+   936→    </Select>
+   937→  );
+   938→}
+   939→

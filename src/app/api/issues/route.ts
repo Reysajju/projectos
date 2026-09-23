@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify } from "@/lib/workflow";
 import { runAutomations } from "@/lib/automation";
+import { fireWebhooks } from "@/lib/webhooks";
 import { issueInclude, toIssueDTO } from "@/lib/dto";
 import {
   ApiError,
@@ -145,6 +146,20 @@ export async function POST(req: NextRequest) {
       orgId,
       issueId: created.id,
       actor: { id: session.user.id, name: session.user.name },
+    });
+
+    void fireWebhooks("issue.created", {
+      orgId,
+      actor: { id: session.user.id, name: session.user.name },
+      data: {
+        key: created.key,
+        summary: created.summary,
+        type: created.type.name,
+        status: created.status.name,
+        priority: created.priority?.name ?? null,
+        assignee: created.assignee?.name ?? null,
+        projectKey: created.project.key,
+      },
     });
 
     return NextResponse.json(toIssueDTO(created));

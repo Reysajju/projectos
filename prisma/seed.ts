@@ -5,6 +5,9 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { hashPassword, seedOrgDefaults } from "../src/lib/auth";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 const db = new PrismaClient();
 
@@ -15,6 +18,7 @@ const daysAhead = (n: number) => new Date(now + n * day);
 
 async function clean() {
   const tables = [
+    "webhookDelivery", "webhook", "attachment",
     "notification", "activity", "comment", "issueLabel", "issue",
     "sprint", "project", "label", "priority", "status", "issueType",
     "organizationMember", "organization", "session", "user",
@@ -345,6 +349,99 @@ async function main() {
       },
     ],
   });
+
+  // ─── Webhooks (demo) ──────────────────────────────────────────
+  const whSecret = `whsec_${crypto.randomBytes(24).toString("hex")}`;
+  await db.webhook.create({
+    data: {
+      orgId: org.id,
+      url: "http://localhost:3000/api/webhook-receiver",
+      events: JSON.stringify(["issue.created", "issue.status_changed", "comment.created"]),
+      secret: whSecret,
+      description: "Built-in test receiver — try the Test button to see a signed delivery land.",
+      active: true,
+      createdBy: sarah.id,
+      createdAt: daysAgo(8),
+    },
+  });
+  await db.webhook.create({
+    data: {
+      orgId: org.id,
+      url: "https://hooks.ci.acme.dev/projectos",
+      events: JSON.stringify(["issue.created", "issue.status_changed"]),
+      secret: whSecret,
+      description: "CI pipeline trigger (paused — endpoint is only reachable on the VPN).",
+      active: false,
+      createdBy: marcus.id,
+      createdAt: daysAgo(15),
+    },
+  });
+
+  // ─── Attachments (demo — real files under db/uploads) ─────────
+  const uploadsRoot = path.join(process.cwd(), "db", "uploads", org.id);
+  fs.mkdirSync(uploadsRoot, { recursive: true });
+  async function seedFile(
+    issue: { id: string; key: string; projectId: string },
+    uploader: typeof sarah,
+    originalName: string,
+    mime: string,
+    content: string,
+    created: Date
+  ) {
+    const ext = path.extname(originalName);
+    const storageKey = `${created.getTime().toString(36)}-${crypto.randomBytes(9).toString("hex")}${ext}`;
+    await fs.promises.writeFile(path.join(uploadsRoot, storageKey), content);
+    await db.attachment.create({
+      data: {
+        orgId: org.id,
+        issueId: issue.id,
+        uploadedById: uploader.id,
+        originalName,
+        storageKey,
+        mimeType: mime,
+        size: Buffer.byteLength(content),
+        checksum: crypto.createHash("sha256").update(content).digest("hex"),
+        createdAt: created,
+      },
+    });
+  }
+
+  await seedFile(
+    w9,
+    aisha,
+    "pricing-toggle-screenshot.svg",
+    "image/svg+xml",
+    `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="280" viewBox="0 0 480 280"><rect width="480" height="280" rx="12" fill="#fafaf9"/><rect x="24" y="24" width="200" height="232" rx="10" fill="#fff" stroke="#e7e5e4"/><rect x="256" y="24" width="200" height="232" rx="10" fill="#fff" stroke="#e7e5e4"/><text x="40" y="58" font-family="system-ui" font-size="14" font-weight="700" fill="#1c1917">Monthly</text><text x="40" y="88" font-family="system-ui" font-size="28" font-weight="800" fill="#d97706">$29</text><text x="272" y="58" font-family="system-ui" font-size="14" font-weight="700" fill="#1c1917">Annual −20%</text><text x="272" y="88" font-family="system-ui" font-size="28" font-weight="800" fill="#d97706">$23</text><rect x="40" y="120" width="168" height="8" rx="4" fill="#e7e5e4"/><rect x="40" y="140" width="140" height="8" rx="4" fill="#e7e5e4"/><rect x="40" y="160" width="156" height="8" rx="4" fill="#e7e5e4"/><rect x="272" y="120" width="168" height="8" rx="4" fill="#e7e5e4"/><rect x="272" y="140" width="128" height="8" rx="4" fill="#e7e5e4"/><rect x="272" y="160" width="150" height="8" rx="4" fill="#e7e5e4"/><rect x="40" y="204" width="168" height="32" rx="8" fill="#d97706"/><text x="92" y="225" font-family="system-ui" font-size="13" font-weight="600" fill="#fff">Choose plan</text><rect x="272" y="204" width="168" height="32" rx="8" fill="#1c1917"/><text x="316" y="225" font-family="system-ui" font-size="13" font-weight="600" fill="#fff">Choose plan</text></svg>`,
+    daysAgo(2)
+  );
+  await seedFile(
+    w9,
+    aisha,
+    "repro-steps.txt",
+    "text/plain",
+    `Repro: pricing page → toggle to Annual → discount shown is −25% (spec says −20%).
+Browser: Chrome 129 / macOS 15.0
+Frequency: 5/5
+Notes: looks correct on Firefox — suspect locale-aware number formatting in usePricing() hook.`,
+    daysAgo(2)
+  );
+  await seedFile(
+    w7,
+    aisha,
+    "lighthouse-mobile.json",
+    "application/json",
+    JSON.stringify(
+      {
+        url: "https://staging.acme.dev/pricing",
+        fetchTime: daysAgo(1).toISOString(),
+        categories: { performance: 0.93, accessibility: 0.98, "best-practices": 1.0, seo: 0.97 },
+        audits: { "largest-contentful-paint": { displayValue: "2.4 s" }, "cumulative-layout-shift": { displayValue: "0.04" } },
+      },
+      null,
+      2
+    ),
+    daysAgo(1)
+  );
 
   // ─── Backdate timestamps for charts (burndown / created-vs-resolved) ──
   const doneIssues = await db.issue.findMany({ where: { status: { category: "DONE" } } });

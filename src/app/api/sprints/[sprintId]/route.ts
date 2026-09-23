@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity } from "@/lib/workflow";
+import { fireWebhooks } from "@/lib/webhooks";
 import { toSprintDTO } from "@/lib/dto";
 import {
   ApiError,
@@ -109,6 +110,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         type: "sprint",
         title: `Sprint completed: ${updated.name}`,
         body: `${sprint.project.name} — unfinished issues were moved back to the backlog`,
+      });
+      void fireWebhooks("sprint.completed", {
+        orgId,
+        actor: { id: session.user.id, name: session.user.name },
+        data: { sprint: updated.name, project: sprint.project.name },
       });
     }
 

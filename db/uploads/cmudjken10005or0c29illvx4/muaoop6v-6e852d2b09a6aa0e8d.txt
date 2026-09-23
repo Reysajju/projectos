@@ -1,0 +1,4 @@
+Repro: pricing page → toggle to Annual → discount shown is −25% (spec says −20%).
+Browser: Chrome 129 / macOS 15.0
+Frequency: 5/5
+Notes: looks correct on Firefox — suspect locale-aware number formatting in usePricing() hook.

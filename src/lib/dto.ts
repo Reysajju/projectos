@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type {
   Activity,
+  Attachment,
   Comment,
   CustomField,
   IssueType,
@@ -11,112 +12,34 @@ import type {
   Sprint,
   Status,
   User,
+  Webhook,
+  WebhookDelivery,
 } from "@prisma/client";
 
-// ─── DTOs (API CONTRACT — see worklog.md, BINDING) ──────────────
+// ─── DTOs — single source of truth is ./portal-types ────────────
+// (historically these were duplicated here and drifted; now re-exported)
 
-export type UserDTO = { id: string; name: string; email: string; avatarColor: string; title: string | null };
-export type OrgDTO = { id: string; name: string; slug: string };
-export type MemberDTO = UserDTO & { role: string };
+import type {
+  UserDTO, OrgDTO, MemberDTO,
+  ProjectDTO,
+  TypeDTO, StatusDTO, PriorityDTO, LabelDTO,
+  CustomFieldDTO,
+  SprintDTO,
+  CommentDTO, ActivityDTO, NotificationDTO,
+  IssueDTO,
+  AttachmentDTO, WebhookDTO, WebhookDeliveryDTO,
+} from "./portal-types";
 
-export type ProjectDTO = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  color: string;
-  icon: string;
-  lead: UserDTO | null;
-  archived: boolean;
-  issueCount: number;
-  /** Board column WIP limits: { statusId: maxCount } */
-  wipLimits: Record<string, number>;
-};
-
-export type TypeDTO = { id: string; name: string; color: string; icon: string; order: number };
-export type StatusDTO = { id: string; name: string; category: "TODO" | "IN_PROGRESS" | "DONE"; color: string; order: number };
-export type PriorityDTO = { id: string; name: string; color: string; order: number };
-export type LabelDTO = { id: string; name: string; color: string };
-
-export type CustomFieldType = "TEXT" | "NUMBER" | "DATE" | "SELECT" | "CHECKBOX";
-export type CustomFieldDTO = {
-  id: string;
-  name: string;
-  type: CustomFieldType;
-  options: string[];
-  order: number;
-};
-
-export type SprintDTO = {
-  id: string;
-  projectId: string;
-  name: string;
-  goal: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  status: "FUTURE" | "ACTIVE" | "COMPLETED";
-  order: number;
-};
-
-export type CommentDTO = { id: string; body: string; createdAt: string; author: UserDTO };
-
-export type ActivityDTO = {
-  id: string;
-  type: string;
-  field: string | null;
-  oldValue: string | null;
-  newValue: string | null;
-  createdAt: string;
-  user: UserDTO;
-  issueId: string | null;
-};
-
-export type NotificationDTO = {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  issueId: string | null;
-  read: boolean;
-  createdAt: string;
-};
-
-export type IssueDTO = {
-  id: string;
-  key: string;
-  number: number;
-  summary: string;
-  description: string | null;
-  typeId: string;
-  type: TypeDTO;
-  statusId: string;
-  status: StatusDTO;
-  priorityId: string | null;
-  priority: PriorityDTO | null;
-  assigneeId: string | null;
-  assignee: UserDTO | null;
-  reporterId: string | null;
-  reporter: UserDTO | null;
-  labels: LabelDTO[];
-  storyPoints: number | null;
-  startDate: string | null;
-  dueDate: string | null;
-  estimateHours: number | null;
-  remainingHours: number | null;
-  sprintId: string | null;
-  parentId: string | null;
-  order: number;
-  projectId: string;
-  projectKey: string;
-  projectName: string;
-  createdAt: string;
-  updatedAt: string;
-  commentCount: number;
-  subtaskCount: number;
-  subtasksDone: number;
-  /** Custom field values keyed by fieldId (values are strings). */
-  customFields: Record<string, string>;
-};
+export type {
+  UserDTO, OrgDTO, MemberDTO,
+  ProjectDTO,
+  TypeDTO, StatusDTO, PriorityDTO, LabelDTO,
+  CustomFieldType, CustomFieldDTO,
+  SprintDTO,
+  CommentDTO, ActivityDTO, NotificationDTO,
+  IssueDTO,
+  AttachmentDTO, WebhookDTO, WebhookDeliveryDTO,
+} from "./portal-types";
 
 // ─── Shared Prisma includes (keeps select-shapes consistent) ────
 
@@ -129,7 +52,7 @@ export const issueInclude = {
   project: { select: { key: true, name: true } },
   labels: { include: { label: true } },
   subtasks: { select: { status: { select: { category: true } } } },
-  _count: { select: { comments: true, subtasks: true } },
+  _count: { select: { comments: true, subtasks: true, attachments: true } },
 } satisfies Prisma.IssueInclude;
 
 export type IssueWithRelations = Prisma.IssueGetPayload<{ include: typeof issueInclude }>;
@@ -274,6 +197,64 @@ export function toNotificationDTO(n: Notification): NotificationDTO {
   };
 }
 
+export type AttachmentWithUploader = Prisma.AttachmentGetPayload<{ include: { uploadedBy: true } }>;
+
+export function toAttachmentDTO(a: AttachmentWithUploader): AttachmentDTO {
+  return {
+    id: a.id,
+    originalName: a.originalName,
+    mimeType: a.mimeType,
+    size: a.size,
+    checksum: a.checksum.slice(0, 12),
+    isImage: a.mimeType.startsWith("image/"),
+    createdAt: a.createdAt.toISOString(),
+    uploader: toUserDTO(a.uploadedBy),
+  };
+}
+
+export function parseWebhookEvents(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((e): e is string => typeof e === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export type WebhookWithRelations = Prisma.WebhookGetPayload<{
+  include: { creator: true; deliveries: { orderBy: { createdAt: "desc" }; take: 10 } };
+}>;
+
+export function toWebhookDTO(w: WebhookWithRelations): WebhookDTO {
+  const deliveries = w.deliveries;
+  return {
+    id: w.id,
+    url: w.url,
+    events: parseWebhookEvents(w.events),
+    description: w.description ?? null,
+    active: w.active,
+    createdAt: w.createdAt.toISOString(),
+    creator: toUserDTO(w.creator),
+    stats: {
+      total: deliveries.length,
+      succeeded: deliveries.filter((d) => d.status === "SUCCESS").length,
+    },
+    deliveries: deliveries.map(toWebhookDeliveryDTO),
+  };
+}
+
+export function toWebhookDeliveryDTO(d: WebhookDelivery): WebhookDeliveryDTO {
+  return {
+    id: d.id,
+    event: d.event,
+    status: d.status as WebhookDeliveryDTO["status"],
+    responseCode: d.responseCode ?? null,
+    durationMs: d.durationMs ?? null,
+    error: d.error ?? null,
+    createdAt: d.createdAt.toISOString(),
+  };
+}
+
 export function toIssueDTO(i: IssueWithRelations): IssueDTO {
   return {
     id: i.id,
@@ -308,6 +289,7 @@ export function toIssueDTO(i: IssueWithRelations): IssueDTO {
     commentCount: i._count.comments,
     subtaskCount: i._count.subtasks,
     subtasksDone: i.subtasks.filter((st) => st.status.category === "DONE").length,
+    attachmentCount: i._count.attachments,
     customFields: parseJsonRecord(i.customFields),
   };
 }

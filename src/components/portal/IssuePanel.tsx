@@ -28,6 +28,7 @@ import type {
   IssueDTO,
   IssueDetailPayload,
   SprintDTO,
+  StatusDTO,
 } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./Avatar";
@@ -37,6 +38,7 @@ import { KeyBadge } from "./KeyBadge";
 import { PriorityIcon } from "./PriorityIcon";
 import { RelativeTime, formatDate } from "./RelativeTime";
 import { CustomFieldValue } from "./CustomFieldValue";
+import { AttachmentsSection } from "./AttachmentsSection";
 import { useWorkflowData } from "./use-workflow";
 import { Button } from "@/components/ui/button";
 import {
@@ -267,6 +269,7 @@ export function IssuePanel() {
   }
 
   const canDelete = role === "ADMIN" || role === "MANAGER";
+  const canEditFiles = role !== "VIEWER";
   const subtaskType = types.find((t) => t.name.toLowerCase().includes("sub")) ?? types[types.length - 1];
 
   return (
@@ -740,6 +743,19 @@ export function IssuePanel() {
                   </Button>
                 </form>
               </section>
+
+              <Separator className="my-5" />
+
+              {/* Attachments */}
+              {detail && (
+                <AttachmentsSection
+                  issueId={detail.issue.id}
+                  issueKey={detail.issue.key}
+                  attachments={detail.attachments}
+                  canEdit={canEditFiles}
+                  onChange={(next) => setDetail((d) => (d ? { ...d, attachments: next } : d))}
+                />
+              )}
 
               <Separator className="my-5" />
 

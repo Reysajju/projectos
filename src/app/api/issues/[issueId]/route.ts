@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify, transitionIssue } from "@/lib/workflow";
 import { runAutomations } from "@/lib/automation";
-import { issueInclude, parseJsonRecord, toActivityDTO, toCommentDTO, toIssueDTO } from "@/lib/dto";
+import { fireWebhooks } from "@/lib/webhooks";
+import { issueInclude, parseJsonRecord, toActivityDTO, toAttachmentDTO, toCommentDTO, toIssueDTO } from "@/lib/dto";
 import {
   ApiError,
   canWrite,
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const issue = await db.issue.findUnique({ where: { id: issueId }, include: issueInclude });
     if (!issue || issue.orgId !== session.org.id) return notFound("Issue not found");
 
-    const [comments, activity, subtasks] = await Promise.all([
+    const [comments, activity, subtasks, attachments] = await Promise.all([
       db.comment.findMany({
         where: { issueId },
         include: { author: true },
@@ -75,6 +76,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         include: issueInclude,
         orderBy: [{ order: "asc" }, { createdAt: "asc" }],
       }),
+      db.attachment.findMany({
+        where: { issueId },
+        include: { uploadedBy: true },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
 
     return NextResponse.json({
@@ -82,6 +88,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       comments: comments.map(toCommentDTO),
       activity: activity.map(toActivityDTO),
       subtasks: subtasks.map(toIssueDTO),
+      attachments: attachments.map(toAttachmentDTO),
     });
   });
 }
@@ -426,12 +433,34 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         issueId: current.id,
         actor: { id: actor.id, name: actor.name },
       });
+      void fireWebhooks("issue.status_changed", {
+        orgId,
+        actor: { id: actor.id, name: actor.name },
+        data: {
+          key: updated.key,
+          summary: updated.summary,
+          from: current.status.name,
+          to: updated.status.name,
+        },
+      });
     }
     if (assignment) {
       void runAutomations("issue.assigned", {
         orgId,
         issueId: current.id,
         actor: { id: actor.id, name: actor.name },
+      });
+    }
+    if (Object.keys(data).length > 0 || statusChanged) {
+      void fireWebhooks("issue.updated", {
+        orgId,
+        actor: { id: actor.id, name: actor.name },
+        data: {
+          key: updated.key,
+          summary: updated.summary,
+          status: updated.status.name,
+          changedFields: fieldLogs.map((l) => l.field),
+        },
       });
     }
 
@@ -450,6 +479,11 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (!issue || issue.orgId !== session.org.id) return notFound("Issue not found");
 
     await db.issue.delete({ where: { id: issue.id } });
+    void fireWebhooks("issue.deleted", {
+      orgId: issue.orgId,
+      actor: { id: session.user.id, name: session.user.name },
+      data: { key: issue.key, summary: issue.summary },
+    });
     return NextResponse.json({});
   });
 }

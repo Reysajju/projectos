@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
 import type { ProjectTab } from "@/lib/portal-store";
-import { useProjectDataContext, ProjectDataProvider } from "./project-data";
+import { useProjectDataContext, useProjectData, ProjectDataProvider } from "./project-data";
 import { BoardView } from "./BoardView";
 import { BacklogView } from "./BacklogView";
 import { IssuesTableView } from "./IssuesTableView";

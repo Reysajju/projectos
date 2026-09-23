@@ -63,7 +63,7 @@ const OPERATORS = [
   { value: "contains", label: "contains" },
 ];
 
-type ValueKind = "status" | "type" | "priority" | "member" | "label" | "free" | "none";
+type ValueKind = "status" | "type" | "priority" | "member" | "label" | "free" | "none" | "list";
 
 const ACTIONS: { value: string; label: string; valueKind: ValueKind }[] = [
   { value: "assign_user", label: "Assign to member", valueKind: "member" },
@@ -80,13 +80,16 @@ function ValueSelect({
   kind,
   value,
   onChange,
+  options: optionsOverride,
 }: {
   kind: ValueKind;
   value: string;
   onChange: (v: string) => void;
+  /** Explicit option list — takes precedence over the workspace-derived ones. */
+  options?: { value: string; label: string }[];
 }) {
   const workspace = usePortalStore((s) => s.workspace);
-  const options: { value: string; label: string }[] = (() => {
+  const options: { value: string; label: string }[] = optionsOverride ?? (() => {
     if (!workspace) return [];
     switch (kind) {
       case "status":
@@ -327,6 +330,7 @@ function RuleDialog({
                     ) : (
                       <ValueSelect
                         kind="list"
+                        options={conditionValueOptions(cond.field)}
                         value={cond.value}
                         onChange={(v) => setConditions((c) => c.map((x, j) => (j === i ? { ...x, value: v } : x)))}
                       />

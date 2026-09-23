@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify, notifyMentions } from "@/lib/workflow";
 import { runAutomations } from "@/lib/automation";
+import { fireWebhooks } from "@/lib/webhooks";
 import { toCommentDTO } from "@/lib/dto";
 import { canWrite, clip, forbidden, handle, notFound, parseBody, reqStr, unauthorized } from "@/lib/api-helpers";
 
@@ -76,6 +77,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       issueId: issue.id,
       actor: { id: session.user.id, name: session.user.name },
       commentBody: text,
+    });
+
+    void fireWebhooks("comment.created", {
+      orgId,
+      actor: { id: session.user.id, name: session.user.name },
+      data: { issueKey: issue.key, commentId: comment.id, body: text.slice(0, 500) },
     });
 
     return NextResponse.json(toCommentDTO(comment));

@@ -428,7 +428,7 @@ export function WorkflowDesignerView() {
               <EmptyState
                 icon={GitBranch}
                 title="No statuses yet"
-                description="Create your first status to start shaping the workflow."
+                hint="Create your first status to start shaping the workflow."
               />
             </div>
           )}

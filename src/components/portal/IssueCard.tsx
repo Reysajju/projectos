@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, GitBranch, MessageSquare } from "lucide-react";
+import { CalendarClock, GitBranch, MessageSquare, Paperclip } from "lucide-react";
 
 import type { IssueDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
@@ -67,6 +67,12 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
           <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/80" title={`${issue.commentCount} comments`}>
             <MessageSquare className="size-3" aria-hidden />
             {issue.commentCount}
+          </span>
+        )}
+        {issue.attachmentCount > 0 && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/80" title={`${issue.attachmentCount} attachments`}>
+            <Paperclip className="size-3" aria-hidden />
+            {issue.attachmentCount}
           </span>
         )}
         {issue.dueDate && (

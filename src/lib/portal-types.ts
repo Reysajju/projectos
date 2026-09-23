@@ -148,6 +148,7 @@ export interface IssueDTO {
   commentCount: number;
   subtaskCount: number;
   subtasksDone: number;
+  attachmentCount: number;
   /** Custom field values keyed by fieldId (values are strings). */
   customFields: Record<string, string>;
 }
@@ -203,6 +204,7 @@ export interface IssueDetailPayload {
   comments: CommentDTO[];
   activity: ActivityDTO[];
   subtasks: IssueDTO[];
+  attachments: AttachmentDTO[];
 }
 
 export interface DashboardStatsDTO {
@@ -462,4 +464,66 @@ export interface WorkflowPayload {
   statuses: WorkflowStatusDTO[];
   transitions: WorkflowTransitionDTO[];
   restricted: boolean;
+}
+
+// ─── Attachments (blueprint §15) ────────────────────────────
+
+export interface AttachmentDTO {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  /** First 12 hex chars of the sha256 content checksum. */
+  checksum: string;
+  isImage: boolean;
+  createdAt: string;
+  uploader: UserDTO;
+}
+
+// ─── Webhooks (blueprint §38) ───────────────────────────────
+
+export interface WebhookDeliveryDTO {
+  id: string;
+  event: string;
+  status: "SUCCESS" | "FAILED";
+  responseCode: number | null;
+  durationMs: number | null;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface WebhookDTO {
+  id: string;
+  url: string;
+  events: string[];
+  description: string | null;
+  active: boolean;
+  createdAt: string;
+  creator: UserDTO;
+  stats: { total: number; succeeded: number };
+  deliveries: WebhookDeliveryDTO[];
+}
+
+export interface WebhooksPayload {
+  webhooks: WebhookDTO[];
+}
+
+export interface WebhookTestResult {
+  status: "SUCCESS" | "FAILED";
+  responseCode: number | null;
+  durationMs: number;
+  error: string | null;
+}
+
+export interface ReceiverPing {
+  id: string;
+  at: string;
+  event: string | null;
+  verified: boolean;
+  signatureHeader: string | null;
+  body: unknown;
+}
+
+export interface ReceiverPingsPayload {
+  pings: ReceiverPing[];
 }

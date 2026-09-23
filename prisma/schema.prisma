@@ -32,6 +32,8 @@ model User {
   notifications Notification[]
   savedFilters  SavedFilter[]       @relation("FilterOwner")
   automationRules AutomationRule[] @relation("AutomationCreator")
+  attachments   Attachment[]        @relation("AttachmentUploader")
+  webhooks      Webhook[]           @relation("WebhookCreator")
 }
 
 model Session {
@@ -64,6 +66,8 @@ model Organization {
   automationRules AutomationRule[]
   customFields  CustomField[]
   workflowTransitions WorkflowTransition[]
+  attachments  Attachment[]
+  webhooks     Webhook[]
 }
 
 model OrganizationMember {
@@ -237,6 +241,7 @@ model Issue {
   labels        IssueLabel[]
   activities    Activity[]
   notifications Notification[]
+  attachments   Attachment[]
 
   @@unique([projectId, number])
   @@index([orgId, key])
@@ -334,4 +339,60 @@ model AutomationRule {
   createdBy String
   creator   User      @relation("AutomationCreator", fields: [createdBy], references: [id])
   createdAt DateTime  @default(now())
+}
+
+// ─── Attachments engine (blueprint §15 — S3-style keys, local disk adapter) ──
+
+model Attachment {
+  id           String   @id @default(cuid())
+  orgId        String
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  issueId      String
+  issue        Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User     @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  originalName String
+  storageKey   String   // opaque object key inside the storage bucket (db/uploads)
+  mimeType     String
+  size         Int      // bytes
+  checksum     String   // sha256 hex of the content
+  createdAt    DateTime @default(now())
+
+  @@index([issueId])
+  @@index([orgId, createdAt])
+}
+
+// ─── Webhooks engine (blueprint §38 — signed deliveries + log) ──────────────
+
+model Webhook {
+  id          String   @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  url         String
+  events      String   // JSON string[] — subscribed event types
+  secret      String   // HMAC-SHA256 signing secret (X-Signature: sha256=...)
+  description String?
+  active      Boolean  @default(true)
+  createdBy   String
+  creator     User     @relation("WebhookCreator", fields: [createdBy], references: [id])
+  createdAt   DateTime @default(now())
+
+  deliveries WebhookDelivery[]
+
+  @@index([orgId])
+}
+
+model WebhookDelivery {
+  id           String   @id @default(cuid())
+  webhookId    String
+  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event        String
+  status       String   // SUCCESS | FAILED
+  responseCode Int?
+  durationMs   Int?
+  error        String?
+  payload      String   // JSON envelope that was sent
+  createdAt    DateTime @default(now())
+
+  @@index([webhookId, createdAt])
 }

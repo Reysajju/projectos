@@ -330,3 +330,42 @@ Stage Summary:
 - Remaining from blueprint: attachments (S3-style), webhook/API-key admin UI, email digests, mentions-in-editor, dashboard widget customization, board column manager merging WIP + status ordering.
 - Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); same-column/long-range edges can visually overlap when many edges share endpoints (cosmetic); dev-tools overlay can intercept clicks in preview (dev-only).
 - Recommended next: attachments on issues, board column manager (merge WIP + workflow), email digest cron, webhook admin UI.
+---
+Task ID: 12 (webDevReview round 4 — 2026-09-23 ~11:30 PKT)
+Agent: coordinator (cron review)
+Task: Assess → QA via agent-browser → fix bugs → Attachments (§15) + Webhooks engine (§38)
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy (200), lint clean, baseline browser QA passed (auth, board, WIP chips, no console errors). Phase 4 stable → chose FEATURE WORK this round: the two largest unbuilt blueprint areas — Attachments (§15) and Webhooks/API system (§38).
+
+FEATURES ADDED
+1. ATTACHMENTS (§15) — full stack:
+   - Schema: `Attachment` (orgId, issueId, uploadedById, originalName, storageKey, mimeType, size, sha256 checksum) + indexes; db:pushed.
+   - Storage adapter (`src/lib/storage.ts`): S3-style opaque keys + put/get/delete + `MAX_FILE_BYTES=10MB` + mime allowlist (no executables) + path-traversal guard; local-disk bucket at `db/uploads/<orgId>/` behind an S3-swappable interface. Keys generated server-side (browser never controls path).
+   - API: POST/GET `/api/issues/[issueId]/attachments` (multipart upload w/ 413 size + 415 type errors, Activity row, fireWebhooks issue.updated attachment.added); GET `?download=1` / inline `/api/attachments/[id]` (Content-Disposition, nosniff, org-scoped 404s); DELETE (uploader or ADMIN/MANAGER; removes DB row + object).
+   - UI (`AttachmentsSection.tsx` in IssuePanel between Subtasks and Comments): dropzone with drag-over amber glow, per-file upload progress, type-tinted icon tiles (image/pdf/code/sheet/archive), inline image thumbnails, size+uploader+relative-time meta, download + delete actions, VIEWER read-only. `attachmentCount` added to IssueDTO + paperclip badge on board cards. Seeded demo files (pricing-toggle-screenshot.svg w/ thumbnail, repro-steps.txt on WEB-11; lighthouse-mobile.json on WEB-7).
+2. WEBHOOKS ENGINE (§38) — full stack:
+   - Schema: `Webhook` (url, events JSON, secret, description, active) + `WebhookDelivery` (event, SUCCESS/FAILED, responseCode, durationMs, error, payload; last-50 retention per hook).
+   - Dispatcher (`src/lib/webhooks.ts`): fire-and-forget fan-out with 5s timeout; envelope {id, event, timestamp, org, actor, data}; HMAC-SHA256 `X-Signature: sha256=…` + `X-ProjectOS-Event/Delivery` headers; delivery rows + pruning. Hooked into: issues POST (issue.created), PATCH (issue.updated + issue.status_changed), DELETE (issue.deleted), comments POST (comment.created), sprints PATCH complete (sprint.completed).
+   - API: GET/POST `/api/webhooks` (url regex, event validation, secret auto-gen `whsec_…` shown once), PATCH/DELETE `/api/webhooks/[id]` (ADMIN/MANAGER), GET `/api/webhooks/[id]/deliveries` (25), POST `/api/webhooks/[id]/test` (synchronous signed ping, returns responseCode+durationMs).
+   - BUILT-IN TEST RECEIVER: unauthenticated POST/GET `/api/webhook-receiver` — accepts deliveries, verifies HMAC against every active hook's secret (constant-time compare), keeps a 20-ping ring buffer. Makes the whole §38 flow demonstrable in-sandbox end-to-end.
+   - UI (`WebhooksView.tsx`, sidebar "Webhooks" manageOnly + TopBar title): webhook cards (mono URL, Active/Paused badge, event chips, active Switch, Test/Edit/Delete), expandable per-hook delivery log (status pills 2xx green / ERR red, duration, relative time), create/edit dialog with event-toggle chips + "Use the built-in test receiver →" helper, one-time secret dialog with copy, delete confirm, receiver live-log panel (5s poll) showing `signed`/`unsigned` verdicts, EmptyState.
+3. Seed: 2 demo webhooks (receiver active w/ 3 events; paused CI hook) + 3 attachment files written to db/uploads.
+
+BUGS FOUND & FIXED
+- BUG 12 (serious, tenant isolation): `const { orgId } = session` in `/api/search/advanced` — SessionInfo has no `orgId`, so JQL queries ran with `orgId: undefined` and Prisma treats undefined filters as "no filter" → advanced search returned issues across ALL orgs (masked by single demo org). Fixed to `session.org.id`; verified org-scoped results.
+- BUG 13: Automation builder condition-value dropdown was always empty — `ValueSelect` got `kind="list"` which fell through to empty default options (the separate `conditionValueOptions()` was never passed). Added `options` override prop to ValueSelect and passed `conditionValueOptions(cond.field)`. Verified: dropdown now lists Epic/Story/Task/Bug/Sub-task.
+- BUG 14 (env): "attempt to write a readonly database" 500s on login — my git stash/pop cycle recreated db/custom.db's inode while the dev server's Prisma engine held deleted-inode fds. Fixed by adding `CACHE_BUMP` to db.ts signature (fresh engine opens current file); documented in db.ts comments for future inode swaps.
+- Type-debt cleanup (all pre-existing at HEAD, verified via git stash diff): dto.ts duplicated the portal-types DTO contract and had drifted → consolidated into re-exports of portal-types (single source of truth); IssuePanel missing StatusDTO import; ProjectView using wrong hook name; WorkflowDesignerView EmptyState `description`→`hint`; automation.ts 4× `action.value` narrowing. `tsc --noEmit` now clean for src/** (remaining errors only in examples/, skills/, seed quirk — out of app scope).
+
+VERIFICATION
+- API (curl): attachment upload 201 → inline GET 200 correct bytes → detail payload lists it → DELETE removes DB row + file; webhook create → signed test ping 200 in ~150ms → receiver verified:true; real issue.created/issue.status_changed deliveries logged SUCCESS; external URL logs FAILED gracefully; paused hook sends nothing; PATCH/DELETE webhooks 200; JQL org-scoped.
+- Browser (agent-browser): login → Webhooks nav → cards render (light+dark) → Test button → delivery log shows "200 ping 27 ms" → receiver panel shows "signed" badge; create dialog → secret dialog (whsec_… copy) → new card appears; issue panel attachments render w/ SVG thumbnail → real browser upload via file input (toast + chip) → delete works; board shows 📎1 badge on WEB-9; automation condition dropdown populated; dark mode clean on webhooks + panel; mobile 390=390 no overflow; 0 console errors; lint clean; GET / 200.
+
+Stage Summary:
+- Blueprint §15 (Attachments) and §38 (Webhooks) SHIPPED end-to-end incl. a demonstrable signed-delivery loop. Sidebar: Dashboard, Projects, Search, Automation, Webhooks (manageOnly), Workflow (manageOnly), Team, Settings. Project tabs unchanged.
+- Dev-env notes: (1) db.ts cache now has CACHE_BUMP for inode-swap recovery; (2) reseed wipes attachments table only — `rm -rf db/uploads` before `bun prisma/seed.ts` for a fully clean bucket (seed recreates demo files).
+- Remaining from blueprint: email digests/transactional email (§34), API keys for programmatic access (§38 second half), mentions-in-editor rich input, dashboard widget customization, board column manager merging WIP + status ordering, Issue Links (§16, issue_links table).
+- Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); external webhook URLs fail in sandbox by design (logged FAILED); receiver ring buffer is in-memory (resets on restart).
+- Recommended next: Issue Links (§16 blocks/blocks-by on issue panel), API keys + "personal access tokens" UI, email digest preview page, dashboard widget toggles persisted per user.

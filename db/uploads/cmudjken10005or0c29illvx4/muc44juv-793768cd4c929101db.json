@@ -1,0 +1,18 @@
+{
+  "url": "https://staging.acme.dev/pricing",
+  "fetchTime": "2026-09-22T03:26:45.127Z",
+  "categories": {
+    "performance": 0.93,
+    "accessibility": 0.98,
+    "best-practices": 1,
+    "seo": 0.97
+  },
+  "audits": {
+    "largest-contentful-paint": {
+      "displayValue": "2.4 s"
+    },
+    "cumulative-layout-shift": {
+      "displayValue": "0.04"
+    }
+  }
+}

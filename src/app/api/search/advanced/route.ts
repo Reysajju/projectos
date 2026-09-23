@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   return handle(async () => {
     const session = await getSession(req);
     if (!session) return unauthorized();
-    const { orgId } = session;
+    const orgId = session.org.id;
 
     const body = (await req.json().catch(() => ({}))) as { query?: string };
     const query = (body.query ?? "").trim();

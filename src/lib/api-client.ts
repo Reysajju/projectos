@@ -37,6 +37,12 @@ import type {
   WorkflowTransitionDTO,
   WorkflowStatusDTO,
   StatusCategory,
+  AttachmentDTO,
+  WebhooksPayload,
+  WebhookDTO,
+  WebhookDeliveryDTO,
+  WebhookTestResult,
+  ReceiverPingsPayload,
 } from "./portal-types";
 
 export class ApiError extends Error {
@@ -127,6 +133,38 @@ export const api = {
 
   deleteComment: (commentId: string) =>
     apiFetch<{ ok: boolean }>(`/api/comments/${commentId}`, { method: "DELETE" }),
+
+  // ─── Attachments (multipart — no JSON content-type) ─────────
+
+  uploadAttachment: async (issueId: string, file: File): Promise<AttachmentDTO> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/issues/${issueId}/attachments`, {
+      method: "POST",
+      body: fd,
+      credentials: "same-origin",
+    });
+    let data: unknown = null;
+    try {
+      data = await res.json();
+    } catch {
+      // fall through
+    }
+    if (!res.ok) {
+      const msg =
+        data && typeof data === "object" && "error" in data
+          ? String((data as { error: unknown }).error)
+          : `Upload failed (${res.status})`;
+      throw new ApiError(msg, res.status);
+    }
+    return (data as { attachment: AttachmentDTO }).attachment;
+  },
+
+  attachmentUrl: (attachmentId: string, download = false) =>
+    `/api/attachments/${attachmentId}${download ? "?download=1" : ""}`,
+
+  deleteAttachment: (attachmentId: string) =>
+    apiFetch<Record<string, never>>(`/api/attachments/${attachmentId}`, { method: "DELETE" }),
 
   // ─── Sprints ──────────────────────────────────────────────────
 
@@ -242,4 +280,29 @@ export const api3 = {
       `/api/statuses/${id}${moveTo ? `?moveTo=${encodeURIComponent(moveTo)}` : ""}`,
       { method: "DELETE" }
     ),
+};
+
+// ─── Webhooks engine ───────────────────────────────────────────
+
+export const apiWebhooks = {
+  list: () => apiFetch<WebhooksPayload>("/api/webhooks"),
+
+  create: (body: { url: string; events: string[]; description?: string }) =>
+    apiFetch<{ webhook: WebhookDTO; secret: string }>("/api/webhooks", jsonBody(body, "POST")),
+
+  patch: (
+    id: string,
+    body: Partial<{ url: string; events: string[]; description: string | null; active: boolean }>
+  ) => apiFetch<{ webhook: WebhookDTO }>(`/api/webhooks/${id}`, jsonBody(body, "PATCH")),
+
+  remove: (id: string) =>
+    apiFetch<Record<string, never>>(`/api/webhooks/${id}`, { method: "DELETE" }),
+
+  deliveries: (id: string) =>
+    apiFetch<{ deliveries: WebhookDeliveryDTO[] }>(`/api/webhooks/${id}/deliveries`),
+
+  sendTest: (id: string) =>
+    apiFetch<WebhookTestResult>(`/api/webhooks/${id}/test`, { method: "POST" }),
+
+  receiverPings: () => apiFetch<ReceiverPingsPayload>("/api/webhook-receiver"),
 };

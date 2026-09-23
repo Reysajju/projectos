@@ -19,6 +19,7 @@ import { GlobalCreateProjectDialog } from "./ProjectDialog";
 import { SearchPalette } from "./SearchPalette";
 import { AdvancedSearchView } from "./AdvancedSearchView";
 import { AutomationsView } from "./AutomationsView";
+import { WebhooksView } from "./WebhooksView";
 import { WorkflowDesignerView } from "./WorkflowDesignerView";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -124,6 +125,8 @@ export function PortalApp() {
         return <AdvancedSearchView />;
       case "automations":
         return <AutomationsView />;
+      case "webhooks":
+        return <WebhooksView />;
       case "workflow":
         return <WorkflowDesignerView />;
       case "settings":
