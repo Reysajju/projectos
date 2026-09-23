@@ -93,15 +93,21 @@ delivered. Invitations also expose a copyable claim link in this mode.
   templates with plain-text alternates). Delivery is fire-and-forget and never
   blocks request paths; every attempt is logged to `EmailLog` with
   `SENT` / `FAILED` / `SIMULATED`.
-- **Digest scheduler** — `mini-services/digest-cron` calls
-  `POST /api/digest/cron` (shared secret `DIGEST_CRON_SECRET`) daily at 09:00
-  Asia/Karachi.
+- **Digest scheduler** — Daily at 09:00 via `/api/digest/cron` (configured natively for Vercel via `vercel.json` or shared secret `CRON_SECRET` / `DIGEST_CRON_SECRET`).
+
+## Deploying to Vercel
+
+1. Push your repository to GitHub.
+2. In Vercel, import the GitHub repository.
+3. Configure Environment Variables in Project Settings:
+   - `CRON_SECRET` (e.g. generate a secure random string)
+   - `APP_URL` (optional: defaults to your `https://*.vercel.app` domain)
+   - Optional SMTP credentials (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`)
+4. Click **Deploy**. Vercel will run `prisma generate && next build` and deploy your application.
 
 ## Production checklist
 
-- [ ] `APP_URL` set to the public URL (used in every email link)
-- [ ] SMTP credentials in `.env` + `Settings → Send test email` passes
-- [ ] `COOKIE_SECURE=true` behind HTTPS
-- [ ] `bun run build && bun run start` (standalone output)
-- [ ] Schedule the digest mini-service (`mini-services/digest-cron`)
-- [ ] Backup `db/custom.db` (plus `db/uploads/` for attachments)
+- [ ] `APP_URL` set to the public URL (used in email links)
+- [ ] SMTP credentials in `.env` (optional, for real emails instead of simulation)
+- [ ] `bun run build && bun run start` or deploy to Vercel
+- [ ] Backup `db/custom.db`

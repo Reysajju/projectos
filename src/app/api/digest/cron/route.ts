@@ -15,11 +15,15 @@ export const dynamic = "force-dynamic";
  * Sends the DAILY digest to every member of every org. Weekly digests
  * are only sent on Mondays (Asia/Karachi).
  */
-export async function POST(req: NextRequest) {
+async function runDigestCron(req: NextRequest) {
   return handle(async () => {
-    const secret = process.env.DIGEST_CRON_SECRET;
-    const provided = req.headers.get("x-cron-secret");
-    if (!secret || provided !== secret) {
+    const validSecret = process.env.CRON_SECRET || process.env.DIGEST_CRON_SECRET;
+    const authHeader = req.headers.get("authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+    const customHeader = req.headers.get("x-cron-secret");
+    const provided = bearerToken || customHeader;
+
+    if (!validSecret || provided !== validSecret) {
       return NextResponse.json({ error: "Invalid cron secret" }, { status: 401 });
     }
 
@@ -63,3 +67,6 @@ export async function POST(req: NextRequest) {
     });
   });
 }
+
+export const GET = runDigestCron;
+export const POST = runDigestCron;

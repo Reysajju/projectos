@@ -271,8 +271,8 @@ async function main() {
       { orgId: org.id, userId: sarah.id, projectId: web.id, type: "sprint.started", newValue: webS2.name, createdAt: daysAgo(7) },
       { orgId: org.id, userId: sarah.id, projectId: web.id, type: "sprint.completed", newValue: webS1.name, createdAt: daysAgo(7) },
       { orgId: org.id, userId: marcus.id, projectId: app.id, type: "sprint.started", newValue: appS1.name, createdAt: daysAgo(3) },
-      { orgId: org.id, userId: marcus.id, userId2: undefined, type: "member.joined", newValue: "Lena Brandt", createdAt: daysAgo(20) } as never,
-    ].map(({ userId2: _drop, ...rest }) => rest),
+      { orgId: org.id, userId: marcus.id, type: "member.joined", newValue: "Lena Brandt", createdAt: daysAgo(20) },
+    ],
   });
 
   // ═══ Automation rules (demo) ═════════════════════════════════

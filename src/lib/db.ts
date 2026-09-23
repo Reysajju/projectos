@@ -1,30 +1,50 @@
-// Import the generated client directly (not the @prisma/client barrel) so that
-// after `prisma db:push` regenerates the client, the dev server picks up new
-// model delegates even if its module cache holds a stale @prisma/client copy.
-import { Prisma, PrismaClient } from '.prisma/client/client'
+import { Prisma, PrismaClient } from "@prisma/client";
+import fs from "node:fs";
+import path from "node:path";
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-  prismaSignature: string | undefined
+  prisma: PrismaClient | undefined;
+};
+
+function getDatabaseUrl(): string | undefined {
+  if (process.env.VERCEL) {
+    const rawUrl = process.env.DATABASE_URL || "file:../db/custom.db";
+    // In Vercel serverless functions, the root filesystem is read-only.
+    // If using a SQLite file, copy it to writable /tmp on cold boot.
+    if (rawUrl.startsWith("file:")) {
+      const tmpDb = "/tmp/custom.db";
+      if (!fs.existsSync(tmpDb)) {
+        const candidatePaths = [
+          path.join(process.cwd(), "db", "custom.db"),
+          path.join(process.cwd(), "..", "db", "custom.db"),
+          "/var/task/db/custom.db",
+        ];
+        for (const candidate of candidatePaths) {
+          if (fs.existsSync(candidate)) {
+            try {
+              fs.copyFileSync(candidate, tmpDb);
+              break;
+            } catch {
+              // Ignore copy failure and fall through
+            }
+          }
+        }
+      }
+      return `file:${tmpDb}`;
+    }
+  }
+  return process.env.DATABASE_URL;
 }
 
-// Content signature of the generated client's model set. Keying the global
-// cache on this signature busts it automatically after client regeneration.
-// CACHE_BUMP also lets us force a fresh engine after external events that swap
-// the SQLite file's inode (e.g. git stash/checkout rewriting db/custom.db —
-// the old engine then holds a deleted-inode fd and writes fail as "readonly").
-const CACHE_BUMP = 'v2'
-const signature =
-  Object.values(Prisma.ModelName ?? {}).sort().join(',') + `#${CACHE_BUMP}`
+const dbUrl = getDatabaseUrl();
 
 export const db =
-  globalForPrisma.prisma && globalForPrisma.prismaSignature === signature
-    ? globalForPrisma.prisma
-    : new PrismaClient({
-        log: ['query'],
-      })
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    datasources: dbUrl ? { db: { url: dbUrl } } : undefined,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  });
 
-if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = db
-  globalForPrisma.prismaSignature = signature
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = db;
 }

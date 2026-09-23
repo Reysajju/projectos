@@ -10,7 +10,7 @@ import type { IssueLinkType } from "@/lib/portal-types";
 
 export const dynamic = "force-dynamic";
 
-export const LINK_TYPES: IssueLinkType[] = ["BLOCKS", "DUPLICATES", "RELATES", "CAUSES"];
+const LINK_TYPES: IssueLinkType[] = ["BLOCKS", "DUPLICATES", "RELATES", "CAUSES"];
 
 type Ctx = { params: Promise<{ issueId: string }> };
 

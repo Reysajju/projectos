@@ -15,7 +15,11 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 
-const BUCKET_ROOT = path.join(process.cwd(), "db", "uploads");
+const BUCKET_ROOT =
+  process.env.STORAGE_DIR ||
+  (process.env.VERCEL
+    ? path.join("/tmp", "uploads")
+    : path.join(process.cwd(), "db", "uploads"));
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — configurable limit (§37)
 
