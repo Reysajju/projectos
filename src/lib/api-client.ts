@@ -276,6 +276,24 @@ export const api2 = {
   ) => apiFetch<{ rule: AutomationRuleDTO }>(`/api/automations/${id}`, jsonBody(body, "PATCH")),
   deleteAutomation: (id: string) =>
     apiFetch<Record<string, never>>(`/api/automations/${id}`, { method: "DELETE" }),
+
+  testAutomation: (body: {
+    conditions: { field: string; operator: string; value: string }[];
+    actions: { type: string; value?: string }[];
+    projectId?: string | null;
+  }) =>
+    apiFetch<{
+      scanned: number;
+      matchCount: number;
+      truncated: boolean;
+      matches: {
+        id: string; key: string; summary: string;
+        status: { name: string; color: string };
+        type: { name: string };
+        assignee: { id: string; name: string } | null;
+        wouldApply: string[];
+      }[];
+    }>("/api/automations/test", jsonBody(body, "POST")),
 };
 
 // ─── Workflow designer / statuses ───────────────────────────────

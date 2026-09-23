@@ -2,8 +2,9 @@
 
 /**
  * Dashboard (blueprint §6) with per-user widget customization:
- * visibility + ordering persisted server-side via /api/preferences
- * (key "dashboard.widgets"), so the layout follows the user across devices.
+ * visibility + drag-reorderable ordering persisted server-side via
+ * /api/preferences (key "dashboard.widgets"), so the layout follows
+ * the user across devices.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -19,6 +20,7 @@ import {
   ChevronUp,
   CircleDot,
   FolderPlus,
+  GripVertical,
   LayoutDashboard,
   ListTodo,
   MessageSquare,
@@ -30,6 +32,23 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  KeyboardSensor,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Area,
   AreaChart,
@@ -167,6 +186,73 @@ function ActivityItem({ activity }: { activity: ActivityDTO }) {
 
 // ─── Customize popover ──────────────────────────────────────────
 
+function SortableWidgetRow({
+  widget,
+  visible,
+  onToggle,
+  onMove,
+  isFirst,
+  isLast,
+}: {
+  widget: WidgetDef;
+  visible: boolean;
+  onToggle: (v: boolean) => void;
+  onMove: (dir: -1 | 1) => void;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: widget.id });
+  const Icon = widget.icon;
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors",
+        isDragging ? "z-10 bg-muted shadow-md ring-1 ring-border" : "hover:bg-muted/60",
+        !visible && "opacity-55"
+      )}
+    >
+      <button
+        type="button"
+        className="touch-none rounded p-0.5 text-muted-foreground/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        aria-label={`Reorder ${widget.title}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-3.5" aria-hidden />
+      </button>
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{widget.title}</span>
+      <span className="flex shrink-0 items-center">
+        <button
+          type="button"
+          aria-label={`Move ${widget.title} up`}
+          disabled={isFirst}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+          onClick={() => onMove(-1)}
+        >
+          <ChevronUp className="size-3.5" aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label={`Move ${widget.title} down`}
+          disabled={isLast}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+          onClick={() => onMove(1)}
+        >
+          <ChevronDown className="size-3.5" aria-hidden />
+        </button>
+      </span>
+      <Switch
+        checked={visible}
+        onCheckedChange={onToggle}
+        aria-label={`${visible ? "Hide" : "Show"} ${widget.title}`}
+      />
+    </li>
+  );
+}
+
 function CustomizeWidgets({
   prefs,
   onChange,
@@ -174,6 +260,11 @@ function CustomizeWidgets({
   prefs: WidgetPrefs;
   onChange: (next: WidgetPrefs) => void;
 }) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
   const ordered = prefs.order
     .map((id) => WIDGETS.find((w) => w.id === id))
     .filter((w): w is WidgetDef => w !== undefined);
@@ -194,6 +285,12 @@ function CustomizeWidgets({
     onChange({ ...prefs, order });
   }
 
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    onChange({ ...prefs, order: arrayMove(prefs.order, prefs.order.indexOf(String(active.id)), prefs.order.indexOf(String(over.id))) });
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -206,51 +303,25 @@ function CustomizeWidgets({
         <p className="px-2 pb-1.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
           Dashboard widgets
         </p>
-        <ul className="space-y-0.5">
-          {ordered.map((w, idx) => {
-            const visible = !prefs.hidden.includes(w.id);
-            const Icon = w.icon;
-            return (
-              <li
-                key={w.id}
-                className={cn(
-                  "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/60",
-                  !visible && "opacity-55"
-                )}
-              >
-                <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{w.title}</span>
-                <span className="flex shrink-0 items-center">
-                  <button
-                    type="button"
-                    aria-label={`Move ${w.title} up`}
-                    disabled={idx === 0}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
-                    onClick={() => move(w.id, -1)}
-                  >
-                    <ChevronUp className="size-3.5" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Move ${w.title} down`}
-                    disabled={idx === ordered.length - 1}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
-                    onClick={() => move(w.id, 1)}
-                  >
-                    <ChevronDown className="size-3.5" aria-hidden />
-                  </button>
-                </span>
-                <Switch
-                  checked={visible}
-                  onCheckedChange={(v) => toggle(w.id, v)}
-                  aria-label={`${visible ? "Hide" : "Show"} ${w.title}`}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={ordered.map((w) => w.id)} strategy={verticalListSortingStrategy}>
+            <ul className="space-y-0.5">
+              {ordered.map((w, idx) => (
+                <SortableWidgetRow
+                  key={w.id}
+                  widget={w}
+                  visible={!prefs.hidden.includes(w.id)}
+                  onToggle={(v) => toggle(w.id, v)}
+                  onMove={(dir) => move(w.id, dir)}
+                  isFirst={idx === 0}
+                  isLast={idx === ordered.length - 1}
                 />
-              </li>
-            );
-          })}
-        </ul>
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
         <p className="px-2 pb-1 pt-2 text-[10.5px] leading-relaxed text-muted-foreground/70">
-          Layout is saved to your account and follows you across devices.
+          Drag to reorder · layout is saved to your account and follows you across devices.
         </p>
       </PopoverContent>
     </Popover>

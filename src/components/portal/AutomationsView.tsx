@@ -6,8 +6,10 @@ import {
   CheckCircle2,
   CircleSlash,
   Filter,
+  FlaskConical,
   GitBranch,
   History,
+  Loader2,
   Play,
   Plus,
   Trash2,
@@ -150,6 +152,22 @@ function RuleDialog({
   const [conditions, setConditions] = useState<AutomationConditionDTO[]>([]);
   const [actions, setActions] = useState<AutomationActionDTO[]>([{ type: "notify_assignee" }]);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    | {
+        scanned: number;
+        matchCount: number;
+        truncated: boolean;
+        matches: {
+          id: string; key: string; summary: string;
+          status: { name: string; color: string };
+          type: { name: string };
+          assignee: { id: string; name: string } | null;
+          wouldApply: string[];
+        }[];
+      }
+    | null
+  >(null);
 
   useEffect(() => {
     if (!open) return;
@@ -191,6 +209,21 @@ function RuleDialog({
         return ["1", "2", "3", "5", "8", "13"].map((n) => ({ value: n, label: n }));
       default:
         return [];
+    }
+  }
+
+  async function runTest() {
+    setTesting(true);
+    try {
+      const res = await api2.testAutomation({
+        conditions: conditions.filter((c) => c.value || conditionFieldKind(c.field) === "free"),
+        actions: actions.map((a) => ({ type: a.type, value: a.value || undefined })),
+      });
+      setTestResult(res);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Test run failed");
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -407,17 +440,95 @@ function RuleDialog({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
-            onClick={() => void submit()}
-            disabled={busy}
+        {/* Test-run preview */}
+        {(testing || testResult) && (
+          <div
+            className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3"
+            aria-live="polite"
           >
-            <Zap className="size-3.5" aria-hidden /> {editing ? "Save changes" : "Create rule"}
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+              <FlaskConical className="size-3" aria-hidden /> Dry run — no changes applied
+            </div>
+            {testing ? (
+              <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" aria-hidden /> Matching against the 50 most recently updated issues…
+              </div>
+            ) : testResult ? (
+              testResult.matchCount === 0 ? (
+                <p className="py-1 text-xs text-muted-foreground">
+                  No issues out of the last {testResult.scanned} updated would match these conditions.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">{testResult.matchCount}</span> of{" "}
+                    {testResult.scanned} recent issues would match
+                    {testResult.truncated ? " (showing first 10)" : ""}:
+                  </p>
+                  <ul className="max-h-44 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
+                    {testResult.matches.map((m) => (
+                      <li
+                        key={m.id}
+                        className="rounded-md border border-border/70 bg-card px-2.5 py-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: m.status.color }}
+                            aria-hidden
+                          />
+                          <span className="shrink-0 font-mono text-[11px] font-semibold text-muted-foreground">{m.key}</span>
+                          <span className="min-w-0 flex-1 truncate text-xs text-foreground">{m.summary}</span>
+                        </div>
+                        {m.wouldApply.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1 pl-4">
+                            {m.wouldApply.map((w, wi) => (
+                              <span
+                                key={wi}
+                                className="rounded bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+                              >
+                                {w}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            ) : null}
+          </div>
+        )}
+
+        <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => void runTest()}
+            disabled={testing || busy}
+            title="Preview which recent issues this rule would match — nothing is changed"
+          >
+            {testing ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            ) : (
+              <FlaskConical className="size-3.5" aria-hidden />
+            )}
+            Test run
           </Button>
+          <span className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+              onClick={() => void submit()}
+              disabled={busy}
+            >
+              <Zap className="size-3.5" aria-hidden /> {editing ? "Save changes" : "Create rule"}
+            </Button>
+          </span>
         </DialogFooter>
       </DialogContent>
     </Dialog>

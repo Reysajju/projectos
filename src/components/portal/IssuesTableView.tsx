@@ -1,7 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Download, Inbox } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Columns3,
+  Download,
+  GripVertical,
+  Inbox,
+} from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  KeyboardSensor,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
@@ -32,8 +56,176 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 
 type SortKey = "key" | "updated" | "due";
+
+// ─── Column manager (per-user, persisted) ───────────────────────
+
+const BUILTIN_COLUMNS: { id: string; label: string }[] = [
+  { id: "type", label: "Type" },
+  { id: "status", label: "Status" },
+  { id: "priority", label: "Priority" },
+  { id: "assignee", label: "Assignee" },
+  { id: "sprint", label: "Sprint" },
+  { id: "pts", label: "Pts" },
+  { id: "due", label: "Due" },
+  { id: "updated", label: "Updated" },
+];
+
+const COLUMNS_PREF_KEY = "issues.columns";
+
+interface ColumnPrefs {
+  hidden: string[]; // builtin ids + custom field ids
+  customOrder: string[]; // custom field ids display order
+}
+
+const DEFAULT_COL_PREFS: ColumnPrefs = { hidden: [], customOrder: [] };
+
+function SortableFieldRow({
+  id,
+  label,
+  visible,
+  onToggle,
+}: {
+  id: string;
+  label: string;
+  visible: boolean;
+  onToggle: (v: boolean) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors",
+        isDragging ? "z-10 bg-muted shadow-md ring-1 ring-border" : "hover:bg-muted/60",
+        !visible && "opacity-55"
+      )}
+    >
+      <button
+        type="button"
+        className="touch-none rounded p-0.5 text-muted-foreground/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        aria-label={`Reorder ${label}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-3.5" aria-hidden />
+      </button>
+      <span className="min-w-0 flex-1 truncate text-xs text-foreground">{label}</span>
+      <Switch checked={visible} onCheckedChange={onToggle} aria-label={`${visible ? "Hide" : "Show"} ${label} column`} />
+    </li>
+  );
+}
+
+function ColumnManager({
+  hidden,
+  customFields,
+  customOrder,
+  onChange,
+}: {
+  hidden: string[];
+  customFields: CustomFieldDTO[];
+  customOrder: string[];
+  onChange: (next: ColumnPrefs) => void;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const orderedCustom = useMemo(() => {
+    const byId = new Map(customFields.map((f) => [f.id, f]));
+    const ordered = customOrder.map((id) => byId.get(id)).filter((f): f is CustomFieldDTO => f !== undefined);
+    for (const f of customFields) if (!ordered.includes(f)) ordered.push(f);
+    return ordered;
+  }, [customFields, customOrder]);
+
+  function toggle(id: string, visible: boolean) {
+    onChange({ hidden: visible ? hidden.filter((h) => h !== id) : [...hidden, id], customOrder });
+  }
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIdx = customOrder.indexOf(String(active.id));
+    const newIdx = customOrder.indexOf(String(over.id));
+    const cur = orderedCustom.map((f) => f.id);
+    const from = cur.indexOf(String(active.id));
+    const to = cur.indexOf(String(over.id));
+    void oldIdx; void newIdx;
+    const next = arrayMove(cur, from, to);
+    onChange({ hidden, customOrder: next });
+  }
+
+  const hiddenCount = hidden.length;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-1.5" aria-label="Manage table columns">
+          <Columns3 className="size-3.5" aria-hidden />
+          Columns
+          {hiddenCount > 0 && (
+            <span className="rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+              {hiddenCount} hidden
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-3">
+        <p className="pb-1 text-xs font-semibold text-foreground">Table columns</p>
+        <p className="pb-2 text-[10.5px] leading-relaxed text-muted-foreground/70">
+          Key and Summary are always shown. Layout is saved to your account.
+        </p>
+
+        <p className="px-1 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/70">
+          Built-in
+        </p>
+        <ul className="space-y-0.5">
+          {BUILTIN_COLUMNS.map((c) => {
+            const visible = !hidden.includes(c.id);
+            return (
+              <li key={c.id} className={cn("flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-muted/60", !visible && "opacity-55")}>
+                <span className="min-w-0 flex-1 truncate pl-5 text-xs text-foreground">{c.label}</span>
+                <Switch checked={visible} onCheckedChange={(v) => toggle(c.id, v)} aria-label={`${visible ? "Hide" : "Show"} ${c.label} column`} />
+              </li>
+            );
+          })}
+        </ul>
+
+        {customFields.length > 0 && (
+          <>
+            <p className="px-1 pb-1 pt-3 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/70">
+              Custom fields · drag to reorder
+            </p>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+              <SortableContext items={orderedCustom.map((f) => f.id)} strategy={verticalListSortingStrategy}>
+                <ul className="space-y-0.5">
+                  {orderedCustom.map((f) => (
+                    <SortableFieldRow
+                      key={f.id}
+                      id={f.id}
+                      label={f.name}
+                      visible={!hidden.includes(f.id)}
+                      onToggle={(v) => toggle(f.id, v)}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function csvEscape(v: string): string {
   if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
@@ -57,8 +249,42 @@ export function IssuesTableView() {
   const [sortKey, setSortKey] = useState<SortKey>("key");
   const [sortAsc, setSortAsc] = useState(true);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [colPrefs, setColPrefs] = useState<ColumnPrefs>(DEFAULT_COL_PREFS);
   // Inline editing is available to every role except VIEWER (API enforces too).
   const editable = role !== "VIEWER";
+
+  // Load per-user column prefs (best-effort).
+  useEffect(() => {
+    let alive = true;
+    api
+      .getPreferences()
+      .then((p) => {
+        if (!alive) return;
+        const raw = p[COLUMNS_PREF_KEY];
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          const rec = raw as Partial<ColumnPrefs>;
+          setColPrefs({
+            hidden: Array.isArray(rec.hidden)
+              ? rec.hidden.filter((id): id is string => typeof id === "string")
+              : [],
+            customOrder: Array.isArray(rec.customOrder)
+              ? rec.customOrder.filter((id): id is string => typeof id === "string")
+              : [],
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateColPrefs(next: ColumnPrefs) {
+    setColPrefs(next);
+    void api.setPreference(COLUMNS_PREF_KEY, next).catch(() => {
+      toast.error("Couldn't save column layout");
+    });
+  }
 
   const statuses = useMemo(
     () => [...(workspace?.statuses ?? [])].sort((a, b) => a.order - b.order),
@@ -68,6 +294,17 @@ export function IssuesTableView() {
 
   const sprints = data?.sprints ?? [];
   const sprintName = (id: string | null) => (id ? sprints.find((s) => s.id === id)?.name ?? "—" : "—");
+
+  // Effective visible custom fields (ordered + self-healed) and hidden builtin checks.
+  const visibleCustomFields = useMemo(() => {
+    const byId = new Map(customFields.map((f) => [f.id, f]));
+    const ordered = colPrefs.customOrder
+      .map((id) => byId.get(id))
+      .filter((f): f is CustomFieldDTO => f !== undefined);
+    for (const f of customFields) if (!ordered.includes(f)) ordered.push(f);
+    return ordered.filter((f) => !colPrefs.hidden.includes(f.id));
+  }, [customFields, colPrefs]);
+  const showCol = (id: string) => !colPrefs.hidden.includes(id);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -111,38 +348,25 @@ export function IssuesTableView() {
 
   function exportCsv() {
     if (!data) return;
-    const header = [
-      "Key",
-      "Summary",
-      "Type",
-      "Status",
-      "Priority",
-      "Assignee",
-      "Sprint",
-      "Story points",
-      "Due",
-      "Updated",
-      ...customFields.map((f) => f.name),
+    const cols: { header: string; value: (i: IssueDTO) => string }[] = [
+      { header: "Key", value: (i) => i.key },
+      { header: "Summary", value: (i) => i.summary },
+      ...(showCol("type") ? [{ header: "Type", value: (i: IssueDTO) => i.type.name }] : []),
+      ...(showCol("status") ? [{ header: "Status", value: (i: IssueDTO) => i.status.name }] : []),
+      ...(showCol("priority") ? [{ header: "Priority", value: (i: IssueDTO) => i.priority?.name ?? "" }] : []),
+      ...(showCol("assignee") ? [{ header: "Assignee", value: (i: IssueDTO) => i.assignee?.name ?? "" }] : []),
+      ...(showCol("sprint") ? [{ header: "Sprint", value: (i: IssueDTO) => sprintName(i.sprintId) }] : []),
+      ...(showCol("pts") ? [{ header: "Story points", value: (i: IssueDTO) => i.storyPoints?.toString() ?? "" }] : []),
+      ...(showCol("due") ? [{ header: "Due", value: (i: IssueDTO) => (i.dueDate ? formatDate(i.dueDate) : "") }] : []),
+      ...(showCol("updated") ? [{ header: "Updated", value: (i: IssueDTO) => formatDate(i.updatedAt) }] : []),
+      ...visibleCustomFields.map((f) => ({
+        header: f.name,
+        value: (i: IssueDTO) => formatCustom(i.customFields?.[f.id], f.type),
+      })),
     ];
-    const lines = [header.join(",")];
+    const lines = [cols.map((c) => csvEscape(c.header)).join(",")];
     for (const i of rows) {
-      lines.push(
-        [
-          i.key,
-          i.summary,
-          i.type.name,
-          i.status.name,
-          i.priority?.name ?? "",
-          i.assignee?.name ?? "",
-          sprintName(i.sprintId),
-          i.storyPoints?.toString() ?? "",
-          i.dueDate ? formatDate(i.dueDate) : "",
-          formatDate(i.updatedAt),
-          ...customFields.map((f) => formatCustom(i.customFields?.[f.id], f.type)),
-        ]
-          .map((c) => csvEscape(c))
-          .join(",")
-      );
+      lines.push(cols.map((c) => csvEscape(c.value(i))).join(","));
     }
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -182,6 +406,12 @@ export function IssuesTableView() {
               <span className="font-medium text-muted-foreground">sprint</span> or custom cells to edit inline
             </span>
           )}
+          <ColumnManager
+            hidden={colPrefs.hidden}
+            customFields={customFields}
+            customOrder={colPrefs.customOrder}
+            onChange={updateColPrefs}
+          />
           <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv} disabled={rows.length === 0}>
             <Download className="size-3.5" aria-hidden /> Export CSV
           </Button>
@@ -201,19 +431,19 @@ export function IssuesTableView() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-24"><SortHeader k="key" label="Key" /></TableHead>
                 <TableHead className="min-w-64">Summary</TableHead>
-                <TableHead className="w-20">Type</TableHead>
-                <TableHead className="w-40">Status</TableHead>
-                <TableHead className="w-20">Priority</TableHead>
-                <TableHead className="w-36">Assignee</TableHead>
-                <TableHead className="w-32">Sprint</TableHead>
-                <TableHead className="w-14 text-right">Pts</TableHead>
-                <TableHead className="w-24"><SortHeader k="due" label="Due" /></TableHead>
-                {customFields.map((f) => (
+                {showCol("type") && <TableHead className="w-20">Type</TableHead>}
+                {showCol("status") && <TableHead className="w-40">Status</TableHead>}
+                {showCol("priority") && <TableHead className="w-20">Priority</TableHead>}
+                {showCol("assignee") && <TableHead className="w-36">Assignee</TableHead>}
+                {showCol("sprint") && <TableHead className="w-32">Sprint</TableHead>}
+                {showCol("pts") && <TableHead className="w-14 text-right">Pts</TableHead>}
+                {showCol("due") && <TableHead className="w-24"><SortHeader k="due" label="Due" /></TableHead>}
+                {visibleCustomFields.map((f) => (
                   <TableHead key={f.id} className="w-28 whitespace-nowrap" title={f.name}>
                     {f.name}
                   </TableHead>
                 ))}
-                <TableHead className="w-28"><SortHeader k="updated" label="Updated" /></TableHead>
+                {showCol("updated") && <TableHead className="w-28"><SortHeader k="updated" label="Updated" /></TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -234,63 +464,79 @@ export function IssuesTableView() {
                   <TableCell>
                     <span className="line-clamp-1 text-sm font-medium text-foreground">{issue.summary}</span>
                   </TableCell>
-                  <TableCell>
-                    <IssueTypeIcon type={issue.type} />
-                    <span className="sr-only">{issue.type.name}</span>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Select value={issue.statusId} onValueChange={(v) => void changeStatus(issue, v)}>
-                      <SelectTrigger
-                        size="sm"
-                        className="h-7 w-[132px] border-dashed bg-card text-xs"
-                        aria-label={`Status of ${issue.key}`}
-                      >
-                        <span className="flex items-center gap-1.5 truncate">
-                          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: issue.status.color }} aria-hidden />
-                          <span className="truncate">{issue.status.name}</span>
+                  {showCol("type") && (
+                    <TableCell>
+                      <IssueTypeIcon type={issue.type} />
+                      <span className="sr-only">{issue.type.name}</span>
+                    </TableCell>
+                  )}
+                  {showCol("status") && (
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Select value={issue.statusId} onValueChange={(v) => void changeStatus(issue, v)}>
+                        <SelectTrigger
+                          size="sm"
+                          className="h-7 w-[132px] border-dashed bg-card text-xs"
+                          aria-label={`Status of ${issue.key}`}
+                        >
+                          <span className="flex items-center gap-1.5 truncate">
+                            <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: issue.status.color }} aria-hidden />
+                            <span className="truncate">{issue.status.name}</span>
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {statuses.map((s: StatusDTO) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              <span className="flex items-center gap-2">
+                                <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
+                                {s.name}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                  )}
+                  {showCol("priority") && (
+                    <TableCell>
+                      <PriorityIcon priority={issue.priority} />
+                      <span className="sr-only">{issue.priority?.name ?? "none"}</span>
+                    </TableCell>
+                  )}
+                  {showCol("assignee") && (
+                    <TableCell>
+                      {issue.assignee ? (
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="sm" />
+                          <span className="max-w-20 truncate">{issue.assignee.name}</span>
                         </span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {statuses.map((s: StatusDTO) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            <span className="flex items-center gap-2">
-                              <span className="size-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
-                              {s.name}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <PriorityIcon priority={issue.priority} />
-                    <span className="sr-only">{issue.priority?.name ?? "none"}</span>
-                  </TableCell>
-                  <TableCell>
-                    {issue.assignee ? (
-                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="sm" />
-                        <span className="max-w-20 truncate">{issue.assignee.name}</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground/80">Unassigned</span>
-                    )}
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <SprintCell issue={issue} sprints={sprints} editable={editable} onSaved={applyIssue} />
-                  </TableCell>
-                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                    <PointsCell issue={issue} editable={editable} onSaved={applyIssue} />
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDateShort(issue.dueDate)}</TableCell>
-                  {customFields.map((f) => (
+                      ) : (
+                        <span className="text-xs text-muted-foreground/80">Unassigned</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {showCol("sprint") && (
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <SprintCell issue={issue} sprints={sprints} editable={editable} onSaved={applyIssue} />
+                    </TableCell>
+                  )}
+                  {showCol("pts") && (
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <PointsCell issue={issue} editable={editable} onSaved={applyIssue} />
+                    </TableCell>
+                  )}
+                  {showCol("due") && (
+                    <TableCell className="text-xs text-muted-foreground">{formatDateShort(issue.dueDate)}</TableCell>
+                  )}
+                  {visibleCustomFields.map((f) => (
                     <TableCell key={f.id} className="text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                       <CustomCell issue={issue} field={f} editable={editable} onSaved={applyIssue} />
                     </TableCell>
                   ))}
-                  <TableCell>
-                    <span className="text-xs text-muted-foreground/80">{formatDateShort(issue.updatedAt)}</span>
-                  </TableCell>
+                  {showCol("updated") && (
+                    <TableCell>
+                      <span className="text-xs text-muted-foreground/80">{formatDateShort(issue.updatedAt)}</span>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

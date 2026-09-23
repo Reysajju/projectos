@@ -560,3 +560,39 @@ Stage Summary:
 - Remaining blueprint gaps: email digests via real SMTP (swap point in sendEmail), sprint auto-planning week-scheduling (dates), roadmap arrow hover → floating type label, Issues-table column show/hide, dashboard widget drag (buttons exist).
 - Known minor: velocity "assumed" label uses 20 pts constant; outbox prune is org-wide (no per-user filter); Escape in Select-in-Dialog closes both (shadcn default).
 - Recommended next: Issues-table column manager (show/hide custom fields), dashboard widget drag-reorder, JQL-lite search operators (IN / ORDER BY), automation rule test-run button.
+---
+Task ID: 17 (round 9)
+Agent: coordinator
+Task: QA assessment (agent-browser) → status STABLE → shipped 3 features: automation rule test-run (dry-run), Issues-table column manager, dashboard widget drag-reorder
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy; lint + tsc clean (pre-existing prisma/seed.ts quirk only); browser sweep passed. Initial console showed BoardView "SortableKeyboardCoordinates" errors → root-caused as STALE Turbopack session history (disk file correct, export verified in node_modules, 0 errors after console --clear + fresh reload). Dev server died once mid-session (known flakiness), restarted detached, stable since. One transient notifications 500 during restart window — not reproducible on fresh load. → phase STABLE → FEATURE WORK on round-8 recommended next steps.
+
+FEATURE 1 — AUTOMATION RULE TEST-RUN / DRY-RUN (§19)
+- automation.ts: exported pure `conditionsMatch(conditions, issue, actorId)` (wraps private evalCondition, no db) and `describeAction(action, memberNames)` returning human-readable "would do" summaries.
+- New API POST /api/automations/test: body { conditions, actions } (tests UNSAVED editor state), scans the 50 most recently updated org issues (optional projectId scope), returns { scanned, matchCount, matches[≤10 with key/summary/status/type/assignee + wouldApply chips], truncated }. Pure evaluation — zero writes.
+- api-client: api2.testAutomation().
+- RuleDialog: "Test run" button (FlaskConical) in footer-left; amber dry-run panel (aria-live) renders "N of M recent issues would match" + scrollable match cards with status dot + emerald would-apply chips, or "no issues would match" empty state, or loading state ("Matching against the 50 most recently updated issues…").
+- Browser-verified: "Escalate critical bugs" (Type equals Bug; Set priority High; Add label security) → "6 of 41 recent issues would match" listing WEB-6/WEB-15/WEB-11/AI-6/APP-11/APP-6 each with "Set priority: High" + "Add label: +security" chips. Dark mode verified.
+
+FEATURE 2 — ISSUES-TABLE COLUMN MANAGER (§12 polish)
+- IssuesTableView: new "Columns" popover (Columns3 icon) with amber "N hidden" badge; Built-in section (Type/Status/Priority/Assignee/Sprint/Pts/Due/Updated — Key+Summary always shown) with switches; Custom fields section with dnd-kit sortable rows (GripVertical handle-only listeners, PointerSensor distance 4, KeyboardSensor sortableKeyboardCoordinates) + switches.
+- Persisted per-user via /api/preferences key "issues.columns" = { hidden[], customOrder[] }, self-healing for new fields; loaded on mount with alive-guard.
+- Table header + body cells conditionally rendered via showCol()/visibleCustomFields; CSV export rebuilt as column-model (respects visibility + custom order).
+- Browser-verified: hid Priority → column gone + badge "1 hidden"; full reload → still hidden (persisted); dragged "GA window" above "Environment" → order applied; dark mode popover clean; restored Priority afterwards (custom drag order intentionally left in place).
+
+FEATURE 3 — DASHBOARD WIDGET DRAG-REORDER (§6 upgrade)
+- DashboardView CustomizeWidgets rebuilt on dnd-kit sortable (same pattern): new SortableWidgetRow with grip handle (listeners on handle only), drag-lift styling (bg-muted + ring + shadow), chevrons kept as a11y fallback, Switches unchanged; footer hint "Drag to reorder · layout is saved to your account…".
+- Browser-verified: dragged "Active sprints" above "My issues" → popover list AND dashboard grid live-reordered; dragged back to restore default order; mobile 390px popover fits with handles visible.
+
+QA / VERIFICATION
+- lint clean; tsc clean for app code (fixed transient self-inflicted parse error mid-edit — aria-label missing paren — corrected and verified on disk).
+- Browser: all three features exercised light + dark; mobile 390px = 0 horizontal overflow (dashboard + customize popover); fresh-load console = 0 errors (stale parse-error replays cleared via touch + console --clear + reload).
+- Dev-env: dev server died once (known), restarted detached via nohup, stable since.
+
+Stage Summary:
+- Round 9 shipped: automation rule test-run dry-run API + preview panel, Issues-table per-user column manager (show/hide + custom-field drag-reorder + CSV-aware), dashboard widget drag-reorder (upgrading buttons to dnd-kit drag).
+- Remaining blueprint gaps: real SMTP for digests (swap point exists), JQL-lite IN/ORDER BY operators, sprint auto-planning date scheduling, workflow designer validation hints, attachments previews.
+- Known minor: automation test-run scans org-wide (project-scope param supported in API but not yet surfaced in UI); Escape in Select-in-Dialog closes both (shadcn default); outbox prune is org-wide.
+- Recommended next: JQL-lite IN / ORDER BY operators in Advanced Search, per-project scope selector for automation test-run, workflow designer edge validation + orphan-status warnings, attachment image previews in issue panel.

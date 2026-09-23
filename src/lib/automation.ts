@@ -59,6 +59,46 @@ interface IssueCtx {
   commentBody?: string;
 }
 
+/**
+ * Evaluate a rule's conditions against a hydrated issue (pure — no writes).
+ * Used both by the live engine and the test-run dry endpoint.
+ */
+export function conditionsMatch(
+  conditions: AutomationCondition[],
+  issue: {
+    statusId?: string; type?: { name?: string } | null; status?: { name?: string } | null;
+    priority?: { name?: string } | null; assigneeId?: string | null;
+    summary?: string; storyPoints?: number | null;
+    labels?: { label?: { name?: string } }[];
+  },
+  actorId: string
+): boolean {
+  return conditions.every((cond) =>
+    evalCondition(cond, { issue: issue as IssueCtx["issue"], actor: { id: actorId, name: "" }, orgId: "" })
+  );
+}
+
+/** Human-readable summary of what an action WOULD do (no execution). */
+export function describeAction(action: AutomationAction, memberNames?: Map<string, string>): string {
+  const label = AUTOMATION_ACTION_TYPES.find((t) => t.value === action.type)?.label ?? action.type;
+  switch (action.type) {
+    case "assign_user":
+    case "notify_user": {
+      const who = action.value ? memberNames?.get(action.value) ?? "member" : "member";
+      return `${label}: ${who}`;
+    }
+    case "set_priority":
+    case "transition_to":
+      return `${label}: ${action.value ?? "?"}`;
+    case "add_label":
+      return `${label}: +${action.value ?? "?"}`;
+    case "remove_label":
+      return `${label}: −${action.value ?? "?"}`;
+    default:
+      return label;
+  }
+}
+
 function evalCondition(cond: AutomationCondition, c: IssueCtx): boolean {
   const issue = c.issue;
   const eq = (a: unknown, b: string) => String(a ?? "").toLowerCase() === b.trim().toLowerCase();
