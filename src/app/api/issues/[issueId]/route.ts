@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify, transitionIssue } from "@/lib/workflow";
+import { runAutomations } from "@/lib/automation";
 import { issueInclude, toActivityDTO, toCommentDTO, toIssueDTO } from "@/lib/dto";
 import {
   ApiError,
@@ -99,8 +100,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     // ── Status: MUST go through the workflow engine (its own activity + notify) ──
     const statusRaw = idOrNull(body, "statusId");
     if (statusRaw === null) throw new ApiError("statusId cannot be empty", 400);
+    let statusChanged = false;
     if (statusRaw !== undefined && statusRaw !== current.statusId) {
       await transitionIssue({ issueId: current.id, newStatusId: statusRaw, actor });
+      statusChanged = true;
     }
 
     // ── Type ──
@@ -336,6 +339,22 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
     const updated = await db.issue.findUnique({ where: { id: current.id }, include: issueInclude });
     if (!updated) return notFound("Issue not found");
+
+    if (statusChanged) {
+      void runAutomations("issue.status_changed", {
+        orgId,
+        issueId: current.id,
+        actor: { id: actor.id, name: actor.name },
+      });
+    }
+    if (assignment) {
+      void runAutomations("issue.assigned", {
+        orgId,
+        issueId: current.id,
+        actor: { id: actor.id, name: actor.name },
+      });
+    }
+
     return NextResponse.json(toIssueDTO(updated));
   });
 }

@@ -74,17 +74,17 @@ function BoardColumn({
   return (
     <section
       aria-label={`Column ${status.name}`}
-      className="flex w-[280px] shrink-0 flex-col rounded-lg bg-stone-100/80 ring-1 ring-stone-200/60 sm:w-72"
+      className="flex w-[280px] shrink-0 flex-col rounded-lg bg-muted/80 ring-1 ring-border sm:w-72"
     >
       <header className="flex items-center gap-2 px-3 pb-1 pt-3">
         <span className="size-2.5 rounded-full" style={{ backgroundColor: status.color }} aria-hidden />
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-600">{status.name}</h3>
-        <span className="rounded bg-stone-200/80 px-1.5 text-[10px] font-semibold text-stone-500">{issues.length}</span>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{status.name}</h3>
+        <span className="rounded bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">{issues.length}</span>
         <button
           type="button"
           onClick={onNewIssue}
           aria-label={`New issue in ${status.name}`}
-          className="ml-auto rounded p-1 text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+          className="ml-auto rounded p-1 text-muted-foreground/80 transition-colors hover:bg-muted hover:text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         >
           <Plus className="size-3.5" aria-hidden />
         </button>
@@ -93,14 +93,14 @@ function BoardColumn({
         ref={setNodeRef}
         className={cn(
           "flex min-h-[140px] max-h-[calc(100vh-19rem)] flex-1 flex-col gap-2 overflow-y-auto p-2 transition-colors [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5",
-          isOver && "bg-amber-100/40 ring-1 ring-inset ring-amber-500/30 rounded-lg"
+          isOver && "bg-amber-500/15 ring-1 ring-inset ring-amber-500/30 rounded-lg"
         )}
       >
         {issues.map((issue) => (
           <DraggableCard key={issue.id} issue={issue} onOpenIssue={onOpenIssue} />
         ))}
         {issues.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-stone-300/80 py-6 text-[11px] text-stone-400">
+          <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-border py-6 text-[11px] text-muted-foreground/80">
             Drop issues here
           </div>
         )}

@@ -341,3 +341,62 @@ export interface SprintPatchBody {
   endDate?: string | null;
   status?: SprintStatus;
 }
+
+// ─── Advanced search (JQL-lite) ─────────────────────────────────
+
+export interface AdvancedSearchPayload {
+  issues: IssueDTO[];
+  parsed: string;
+  error: string | null;
+}
+
+// ─── Saved filters ──────────────────────────────────────────────
+
+export interface SavedFilterDTO {
+  id: string;
+  name: string;
+  query: string;
+  createdAt: string;
+  owner: { id: string; name: string; avatarColor: string };
+}
+
+export interface FiltersPayload {
+  filters: SavedFilterDTO[];
+}
+
+// ─── Automation rules ───────────────────────────────────────────
+
+export type AutomationTrigger =
+  | "issue.created"
+  | "issue.status_changed"
+  | "issue.assigned"
+  | "comment.created";
+
+export interface AutomationConditionDTO {
+  field: string;
+  operator: "equals" | "notEquals" | "contains";
+  value: string;
+}
+
+export interface AutomationActionDTO {
+  type: string;
+  value?: string;
+}
+
+export interface AutomationRuleDTO {
+  id: string;
+  name: string;
+  trigger: AutomationTrigger;
+  conditions: AutomationConditionDTO[];
+  actions: AutomationActionDTO[];
+  enabled: boolean;
+  runCount: number;
+  lastRunAt: string | null;
+  lastRunResult: string | null;
+  creator: { id: string; name: string; avatarColor: string };
+  createdAt: string;
+}
+
+export interface AutomationsPayload {
+  rules: AutomationRuleDTO[];
+}

@@ -229,3 +229,34 @@ Work Log:
 
 Stage Summary:
 - Project Phase 1–3 (Foundation, Core Issues, Agile) complete per blueprint §40. Configuration-engine UI (workflow designer, custom fields) + Automation UI + JQL are the main unbuilt areas.
+
+---
+Task ID: 9 (webDevReview round 1 — 2026-09-23 09:06 PKT)
+Agent: coordinator (cron review)
+Task: Assess → QA → fix → extend (JQL search, saved filters, automations, dark mode)
+
+Work Log:
+STATUS ASSESSMENT
+- Server healthy (200), lint clean, no page errors. Dev.log showed `workspace 401 → login 200 → workspace 401` — investigated with a fresh browser: login → bootstrap works perfectly; the 401s came from a stale agent-browser daemon racing two sessions (app faultless). One "blank page" sighting was also a stuck agent-browser session (two daemons); resolved by closing and relaunching.
+
+BUGS FOUND & FIXED
+- BUG 4: `runAutomations` wiring referenced undefined `actor` in issues POST route (route uses `session.user`, not `actor`) → 500 on issue creation; fixed. Residue: WEB-21/22/23/24 test issues created despite 500 (transaction committed before throw) — deleted.
+- BUG 5: automation actions crashed on SQLite — `mode: "insensitive"` is unsupported by the SQLite connector; replaced with JS-side case-insensitive matching (find over org-scoped rows). Verified: creating a Bug + moving to In Progress now applies label `security` AND notifies Marcus ("label +security, notified member" on rule run stats).
+- Sweep collateral fixed: StatCard violet tint class mangled during token sweep; AuthView dark brand panel had token classes that break on light bg; `text-violet-400` contrast in light mode corrected to violet-700.
+
+FEATURES ADDED (Phase 4 continues per blueprint §24/§19)
+1. JQL-lite engine (`src/lib/jql.ts`): lexer → recursive-descent parser → AST → safe Prisma where-builder. 14 fields (status/type/priority/assignee/reporter/sprint/project/summary/description/label/points/due/created/updated), operators = / != / ~, AND/OR with parentheses, values: "me", "none", "active/backlog/overdue/7d/today". POST /api/search/advanced.
+2. Saved filters: SavedFilter model + GET/POST /api/filters + DELETE /api/filters/[id]; AdvancedSearchView with query bar, live parse errors, example chips, syntax help dialog, results list, save dialog; sidebar "Saved filters" section (click to run).
+3. Automation engine (`src/lib/automation.ts`): event-driven rules (issue.created / status_changed / assigned / comment.created), conditions (equals/notEquals/contains on 7 fields), 8 action types (assign/unassign/transition/set priority/add+remove label/notify member/notify assignee). Fire-and-forget, loop-safe, run stats (runCount/lastRunAt/lastRunResult) on rule rows. Wired into issues POST/PATCH + comments POST.
+4. Automation builder UI: AutomationsView (sidebar "Automation") with rule cards (WHEN→IF→THEN pipeline chips, enable toggle, run stats, edit/delete) + no-code RuleDialog (trigger select, condition rows, action rows with typed value pickers).
+5. Dark mode: next-themes ThemeProvider (class strategy) + warm-stone dark palette in globals.css (amber primary survives both modes) + user-menu theme switcher (Light/Dark/System). Bulk token sweep of 25 portal files (stone-*/white → foreground/muted/card/border tokens) so all views follow the theme; Sidebar + AuthView brand panel intentionally stay dark.
+6. Styling polish: StatCards get accent glow + hover lift + tabular-nums; TopBar titles for Search/Automation views.
+
+VERIFICATION
+- API: JQL queries return correct issue sets; bad queries return precise parser errors with position hints; filters/automations CRUD verified; automation e2e (create Bug → move → label + notification) passed.
+- Browser: saved filter click seeds + runs query; automation builder create flow works (rule card appears, toast confirms); dark mode verified on dashboard/board/panel/automations; light mode restored intact; mobile search view no overflow (390=390); lint clean.
+
+Stage Summary:
+- Phase 4 (Configuration/Extensibility) substantially advanced: JQL search + saved filters + automation engine/builder + dark mode now live. Remaining from blueprint: workflow designer (visual), custom fields, roadmap/Gantt, attachments (S3-style), mentions-in-editor, webhook/API-key admin UI, email digests.
+- Known minor: Escape inside a Select inside a Dialog closes both (shadcn default); automation value selects show empty placeholder until clicked; dev-tools overlay can intercept clicks in preview (dev-only).
+- Recommended next: workflow transition designer UI, custom field engine (schema exists in blueprint §9), roadmap timeline, CSV export column config, board WIP limits.

@@ -276,10 +276,10 @@ export function CreateIssueDialog() {
                     <Button
                       type="button"
                       variant="outline"
-                      className={cn("h-9 flex-1 justify-start font-normal", !dueShort && "text-stone-400")}
+                      className={cn("h-9 flex-1 justify-start font-normal", !dueShort && "text-muted-foreground/80")}
                       aria-label="Due date"
                     >
-                      <CalendarClock className="size-3.5 text-stone-400" aria-hidden />
+                      <CalendarClock className="size-3.5 text-muted-foreground/80" aria-hidden />
                       {dueShort || "Set date"}
                     </Button>
                   </PopoverTrigger>
@@ -316,7 +316,7 @@ export function CreateIssueDialog() {
                     onClick={() => setLabelIds((ids) => (active ? ids.filter((i) => i !== l.id) : [...ids, l.id]))}
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
-                      active ? "border-transparent" : "border-stone-200 text-stone-500 hover:border-stone-300"
+                      active ? "border-transparent" : "border-border text-muted-foreground hover:border-border"
                     )}
                     style={active ? { backgroundColor: `${l.color}22`, color: l.color } : undefined}
                   >
@@ -328,7 +328,7 @@ export function CreateIssueDialog() {
           </div>
 
           {archivedProject && (
-            <p className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            <p className="rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
               This project is archived — pick another project.
             </p>
           )}

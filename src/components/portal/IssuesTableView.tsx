@@ -139,7 +139,7 @@ export function IssuesTableView() {
       <button
         type="button"
         onClick={() => toggleSort(k)}
-        className="inline-flex items-center gap-1 rounded text-xs font-medium text-stone-500 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        className="inline-flex items-center gap-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         aria-label={`Sort by ${label}`}
       >
         {label}
@@ -165,9 +165,9 @@ export function IssuesTableView() {
           hint={data.issues.length === 0 ? "Create the first issue with the button above." : "Try clearing filters."}
         />
       ) : (
-        <div className="max-h-[calc(100vh-16rem)] overflow-y-auto rounded-lg border border-stone-200 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
+        <div className="max-h-[calc(100vh-16rem)] overflow-y-auto rounded-lg border border-border [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
           <Table>
-            <TableHeader className="sticky top-0 z-10 bg-stone-50/95 backdrop-blur">
+            <TableHeader className="sticky top-0 z-10 bg-muted/50/95 backdrop-blur">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-24"><SortHeader k="key" label="Key" /></TableHead>
                 <TableHead className="min-w-64">Summary</TableHead>
@@ -197,7 +197,7 @@ export function IssuesTableView() {
                     <KeyBadge>{issue.key}</KeyBadge>
                   </TableCell>
                   <TableCell>
-                    <span className="line-clamp-1 text-sm font-medium text-stone-800">{issue.summary}</span>
+                    <span className="line-clamp-1 text-sm font-medium text-foreground">{issue.summary}</span>
                   </TableCell>
                   <TableCell>
                     <IssueTypeIcon type={issue.type} />
@@ -207,7 +207,7 @@ export function IssuesTableView() {
                     <Select value={issue.statusId} onValueChange={(v) => void changeStatus(issue, v)}>
                       <SelectTrigger
                         size="sm"
-                        className="h-7 w-[132px] border-dashed bg-white text-xs"
+                        className="h-7 w-[132px] border-dashed bg-card text-xs"
                         aria-label={`Status of ${issue.key}`}
                       >
                         <span className="flex items-center gap-1.5 truncate">
@@ -233,23 +233,23 @@ export function IssuesTableView() {
                   </TableCell>
                   <TableCell>
                     {issue.assignee ? (
-                      <span className="flex items-center gap-1.5 text-xs text-stone-600">
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="sm" />
                         <span className="max-w-20 truncate">{issue.assignee.name}</span>
                       </span>
                     ) : (
-                      <span className="text-xs text-stone-400">Unassigned</span>
+                      <span className="text-xs text-muted-foreground/80">Unassigned</span>
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="truncate text-xs text-stone-500">{sprintName(issue.sprintId)}</span>
+                    <span className="truncate text-xs text-muted-foreground">{sprintName(issue.sprintId)}</span>
                   </TableCell>
-                  <TableCell className="text-right text-xs text-stone-600">
+                  <TableCell className="text-right text-xs text-muted-foreground">
                     {issue.storyPoints ?? "—"}
                   </TableCell>
-                  <TableCell className="text-xs text-stone-500">{formatDateShort(issue.dueDate)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatDateShort(issue.dueDate)}</TableCell>
                   <TableCell>
-                    <span className="text-xs text-stone-400">{formatDateShort(issue.updatedAt)}</span>
+                    <span className="text-xs text-muted-foreground/80">{formatDateShort(issue.updatedAt)}</span>
                   </TableCell>
                 </TableRow>
               ))}

@@ -226,8 +226,8 @@ export function ProjectDialog({
                       className={cn(
                         "flex size-8 items-center justify-center rounded-md border transition-colors",
                         icon === ic
-                          ? "border-amber-600 bg-amber-50 text-amber-700"
-                          : "border-stone-200 text-stone-500 hover:bg-stone-50"
+                          ? "border-amber-600 bg-amber-500/10 text-amber-700"
+                          : "border-border text-muted-foreground hover:bg-muted/50"
                       )}
                     >
                       <Icon className="size-4" aria-hidden />

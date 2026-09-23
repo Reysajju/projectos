@@ -17,6 +17,8 @@ import { IssuePanel } from "./IssuePanel";
 import { CreateIssueDialog } from "./CreateIssueDialog";
 import { GlobalCreateProjectDialog } from "./ProjectDialog";
 import { SearchPalette } from "./SearchPalette";
+import { AdvancedSearchView } from "./AdvancedSearchView";
+import { AutomationsView } from "./AutomationsView";
 import { Toaster } from "@/components/ui/sonner";
 
 type AuthState = "loading" | "anon" | "authed";
@@ -27,10 +29,10 @@ function Splash() {
       <div className="flex size-12 animate-pulse items-center justify-center rounded-xl bg-amber-600 text-xl font-bold text-white shadow-lg shadow-amber-600/25">
         P
       </div>
-      <div className="flex items-center gap-2 text-sm text-stone-400">
-        <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500 [animation-delay:0ms]" />
-        <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500 [animation-delay:150ms]" />
-        <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500 [animation-delay:300ms]" />
+      <div className="flex items-center gap-2 text-sm text-muted-foreground/80">
+        <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500/100 [animation-delay:0ms]" />
+        <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500/100 [animation-delay:150ms]" />
+        <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500/100 [animation-delay:300ms]" />
         <span className="ml-1">Loading your workspace…</span>
       </div>
     </div>
@@ -117,6 +119,10 @@ export function PortalApp() {
         return activeProjectId ? <ProjectView /> : <ProjectsView />;
       case "team":
         return <TeamView />;
+      case "search":
+        return <AdvancedSearchView />;
+      case "automations":
+        return <AutomationsView />;
       case "settings":
         return <SettingsView />;
       default:

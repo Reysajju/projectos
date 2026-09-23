@@ -25,6 +25,11 @@ import type {
   SprintPatchBody,
   VelocityPayload,
   WorkspacePayload,
+  AdvancedSearchPayload,
+  FiltersPayload,
+  SavedFilterDTO,
+  AutomationsPayload,
+  AutomationRuleDTO,
 } from "./portal-types";
 
 export class ApiError extends Error {
@@ -159,3 +164,36 @@ export const api = {
 };
 
 export type { ActivityDTO };
+
+// ─── Advanced search / saved filters / automations ──────────────
+
+export const api2 = {
+  advancedSearch: (query: string) =>
+    apiFetch<AdvancedSearchPayload>("/api/search/advanced", jsonBody({ query }, "POST")),
+
+  filters: () => apiFetch<FiltersPayload>("/api/filters"),
+  createFilter: (body: { name: string; query: string }) =>
+    apiFetch<{ filter: SavedFilterDTO }>("/api/filters", jsonBody(body, "POST")),
+  deleteFilter: (id: string) =>
+    apiFetch<Record<string, never>>(`/api/filters/${id}`, { method: "DELETE" }),
+
+  automations: () => apiFetch<AutomationsPayload>("/api/automations"),
+  createAutomation: (body: {
+    name: string;
+    trigger: string;
+    conditions: { field: string; operator: string; value: string }[];
+    actions: { type: string; value?: string }[];
+  }) => apiFetch<{ rule: AutomationRuleDTO }>("/api/automations", jsonBody(body, "POST")),
+  patchAutomation: (
+    id: string,
+    body: Partial<{
+      name: string;
+      trigger: string;
+      enabled: boolean;
+      conditions: { field: string; operator: string; value: string }[];
+      actions: { type: string; value?: string }[];
+    }>
+  ) => apiFetch<{ rule: AutomationRuleDTO }>(`/api/automations/${id}`, jsonBody(body, "PATCH")),
+  deleteAutomation: (id: string) =>
+    apiFetch<Record<string, never>>(`/api/automations/${id}`, { method: "DELETE" }),
+};

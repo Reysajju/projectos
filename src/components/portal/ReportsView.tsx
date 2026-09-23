@@ -60,9 +60,9 @@ function ChartCard({
       <CardHeader className="flex-row items-start justify-between space-y-0 pb-2">
         <div>
           <CardTitle className="text-base">{title}</CardTitle>
-          {hint && <p className="mt-0.5 text-xs text-stone-400">{hint}</p>}
+          {hint && <p className="mt-0.5 text-xs text-muted-foreground/80">{hint}</p>}
         </div>
-        {loading && <Loader2 className="size-4 animate-spin text-stone-400" aria-hidden />}
+        {loading && <Loader2 className="size-4 animate-spin text-muted-foreground/80" aria-hidden />}
       </CardHeader>
       <CardContent className="pt-0">
         <div style={{ height: 280 }}>{children}</div>
@@ -170,8 +170,8 @@ export function ReportsView() {
     <div className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-stone-900">Reports</h2>
-          <p className="text-xs text-stone-500">Sprint analytics for {data?.project.name}</p>
+          <h2 className="text-base font-semibold text-foreground">Reports</h2>
+          <p className="text-xs text-muted-foreground">Sprint analytics for {data?.project.name}</p>
         </div>
         <div className="flex items-center gap-2">
           <Select value={sprintId || undefined} onValueChange={setSprintId}>
@@ -216,7 +216,7 @@ export function ReportsView() {
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
               <TrendingDown className="size-6 text-stone-300" aria-hidden />
-              <p className="text-sm text-stone-500">
+              <p className="text-sm text-muted-foreground">
                 {sprints.length === 0 ? "Create and start a sprint to see its burndown." : "No data for this sprint yet."}
               </p>
             </div>
@@ -240,7 +240,7 @@ export function ReportsView() {
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
               <Zap className="size-6 text-stone-300" aria-hidden />
-              <p className="text-sm text-stone-500">Complete sprints to build a velocity trend.</p>
+              <p className="text-sm text-muted-foreground">Complete sprints to build a velocity trend.</p>
             </div>
           )}
         </ChartCard>
@@ -325,8 +325,8 @@ export function ReportsView() {
 
       {/* Project stats summary */}
       {data && (
-        <div className={cn("flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-stone-200 bg-stone-50/60 px-4 py-3 text-xs text-stone-500")}>
-          <span className="flex items-center gap-1.5 font-medium text-stone-700">
+        <div className={cn("flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-xs text-muted-foreground")}>
+          <span className="flex items-center gap-1.5 font-medium text-foreground/90">
             <PieChartIcon className="size-3.5" aria-hidden /> Snapshot
           </span>
           <span>{data.stats.total} issues</span>

@@ -68,11 +68,11 @@ function IssueRow({ issue }: { issue: IssueDTO }) {
     <button
       type="button"
       onClick={() => setOpenIssue(issue.id)}
-      className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:bg-stone-50"
+      className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:bg-muted/50"
     >
       <IssueTypeIcon type={issue.type} />
       <KeyBadge>{issue.key}</KeyBadge>
-      <span className="min-w-0 flex-1 truncate text-sm text-stone-800">{issue.summary}</span>
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{issue.summary}</span>
       <PriorityIcon priority={issue.priority} />
       <StatusDot status={issue.status} />
       {issue.dueDate && (
@@ -82,8 +82,8 @@ function IssueRow({ issue }: { issue: IssueDTO }) {
             isOverdue(issue.dueDate)
               ? "bg-rose-100 text-rose-700"
               : dueSoon
-                ? "bg-amber-100 text-amber-800"
-                : "text-stone-400"
+                ? "bg-amber-100 text-amber-600"
+                : "text-muted-foreground/80"
           )}
         >
           <CalendarClock className="size-3" aria-hidden />
@@ -98,23 +98,23 @@ function ActivityItem({ activity }: { activity: ActivityDTO }) {
   const Icon = ACTIVITY_ICONS[activity.type] ?? CircleDot;
   return (
     <li className="flex items-start gap-3 px-4 py-2.5">
-      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Icon className="size-3.5" aria-hidden />
       </span>
       <div className="min-w-0 flex-1 text-sm">
-        <span className="font-semibold text-stone-800">{activity.user.name}</span>{" "}
-        <span className="text-stone-500">{activity.type.split(".")[1]?.replace(/_/g, " ") ?? activity.type}</span>
+        <span className="font-semibold text-foreground">{activity.user.name}</span>{" "}
+        <span className="text-muted-foreground">{activity.type.split(".")[1]?.replace(/_/g, " ") ?? activity.type}</span>
         {activity.field && activity.oldValue != null && activity.newValue != null && (
-          <span className="ml-1 text-stone-500">
-            {activity.field}: <span className="text-stone-600">{activity.oldValue}</span>{" "}
-            <span aria-hidden>→</span> <span className="font-medium text-stone-800">{activity.newValue}</span>
+          <span className="ml-1 text-muted-foreground">
+            {activity.field}: <span className="text-muted-foreground">{activity.oldValue}</span>{" "}
+            <span aria-hidden>→</span> <span className="font-medium text-foreground">{activity.newValue}</span>
           </span>
         )}
         {activity.field && (activity.oldValue == null || activity.newValue == null) && (
-          <span className="ml-1 text-stone-500">{activity.field}</span>
+          <span className="ml-1 text-muted-foreground">{activity.field}</span>
         )}
         <div className="mt-0.5">
-          <RelativeTime date={activity.createdAt} className="text-[11px] text-stone-400" />
+          <RelativeTime date={activity.createdAt} className="text-[11px] text-muted-foreground/80" />
         </div>
       </div>
     </li>
@@ -150,11 +150,11 @@ export function DashboardView() {
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             {greeting}
             {me ? `, ${me.name.split(" ")[0]}` : ""} 👋
           </h1>
-          <p className="mt-1 text-sm text-stone-500">{format(new Date(), "EEEE, MMMM d, yyyy")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{format(new Date(), "EEEE, MMMM d, yyyy")}</p>
         </div>
         <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void load()} disabled={loading}>
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden /> Refresh
@@ -180,7 +180,7 @@ export function DashboardView() {
         <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-base">My issues</CardTitle>
-            <span className="text-xs text-stone-400">{data ? `${data.stats.myOpen} open` : ""}</span>
+            <span className="text-xs text-muted-foreground/80">{data ? `${data.stats.myOpen} open` : ""}</span>
           </CardHeader>
           <CardContent className="pt-0">
             {loading ? (
@@ -211,18 +211,18 @@ export function DashboardView() {
               data.activeSprintCards.map((card) => {
                 const pct = card.total > 0 ? Math.round((card.done / card.total) * 100) : 0;
                 return (
-                  <div key={card.sprint.id} className="rounded-lg border border-stone-200 p-3 transition-colors hover:border-stone-300">
+                  <div key={card.sprint.id} className="rounded-lg border border-border p-3 transition-colors hover:border-border">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-stone-800">{card.sprint.name}</span>
-                      <span className="shrink-0 rounded bg-violet-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                      <span className="truncate text-sm font-medium text-foreground">{card.sprint.name}</span>
+                      <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
                         {card.projectKey}
                       </span>
                     </div>
                     <div className="mt-2 flex items-center gap-2">
                       <Progress value={pct} className="h-1.5 flex-1" />
-                      <span className="text-[11px] font-medium text-stone-500">{pct}%</span>
+                      <span className="text-[11px] font-medium text-muted-foreground">{pct}%</span>
                     </div>
-                    <div className="mt-1.5 flex items-center gap-3 text-[11px] text-stone-400">
+                    <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground/80">
                       <span>{card.done}/{card.total} issues</span>
                       <span>{card.donePoints}/{card.points} pts</span>
                       {card.sprint.endDate && <span className="ml-auto">ends {formatDateShort(card.sprint.endDate)}</span>}
@@ -238,7 +238,7 @@ export function DashboardView() {
         <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Created vs resolved</CardTitle>
-            <p className="text-xs text-stone-400">Last 14 days</p>
+            <p className="text-xs text-muted-foreground/80">Last 14 days</p>
           </CardHeader>
           <CardContent className="pt-0">
             {loading ? (

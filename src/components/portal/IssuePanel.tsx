@@ -79,7 +79,7 @@ const ACTIVITY_ICONS: Record<string, typeof MessageSquare> = {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-[11px] uppercase tracking-wide text-stone-400">{label}</Label>
+      <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{label}</Label>
       {children}
     </div>
   );
@@ -278,11 +278,11 @@ export function IssuePanel() {
           </div>
         ) : issue ? (
           <>
-            <SheetHeader className="border-b border-stone-200 px-5 py-3 pr-14">
+            <SheetHeader className="border-b border-border px-5 py-3 pr-14">
               <div className="flex items-center gap-2">
                 <SheetTitle className="flex items-center gap-2 text-sm">
                   <KeyBadge>{issue.key}</KeyBadge>
-                  <span className="text-xs font-normal text-stone-400">{issue.projectName}</span>
+                  <span className="text-xs font-normal text-muted-foreground/80">{issue.projectName}</span>
                 </SheetTitle>
                 <div className="ml-auto flex items-center gap-1">
                   <Button
@@ -302,7 +302,7 @@ export function IssuePanel() {
                   >
                     <SelectTrigger
                       size="sm"
-                      className="h-7 w-[120px] border-none bg-stone-100 shadow-none"
+                      className="h-7 w-[120px] border-none bg-muted shadow-none"
                       aria-label="Issue type"
                     >
                       <span className="flex items-center gap-1.5 text-xs">
@@ -341,7 +341,7 @@ export function IssuePanel() {
                 />
               ) : (
                 <div
-                  className="group flex cursor-text items-start gap-2 rounded-md px-2 py-1 -mx-2 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                  className="group flex cursor-text items-start gap-2 rounded-md px-2 py-1 -mx-2 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
                   role="button"
                   tabIndex={0}
                   aria-label="Edit summary"
@@ -356,19 +356,19 @@ export function IssuePanel() {
                     }
                   }}
                 >
-                  <p className="flex-1 text-base font-semibold leading-snug text-stone-900">{issue.summary}</p>
-                  <Pencil className="mt-1 size-3.5 shrink-0 text-stone-300 transition-colors group-hover:text-stone-500" aria-hidden />
+                  <p className="flex-1 text-base font-semibold leading-snug text-foreground">{issue.summary}</p>
+                  <Pencil className="mt-1 size-3.5 shrink-0 text-stone-300 transition-colors group-hover:text-muted-foreground" aria-hidden />
                 </div>
               )}
 
               {/* Description */}
               <section className="mt-4" aria-label="Description">
                 <div className="flex items-center justify-between">
-                  <Label className="text-[11px] uppercase tracking-wide text-stone-400">Description</Label>
+                  <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Description</Label>
                   {!editingDesc && (
                     <button
                       type="button"
-                      className="text-xs text-stone-400 underline-offset-2 hover:text-amber-700 hover:underline focus-visible:outline-none"
+                      className="text-xs text-muted-foreground/80 underline-offset-2 hover:text-amber-700 hover:underline focus-visible:outline-none"
                       onClick={() => {
                         setDescDraft(issue.description ?? "");
                         setEditingDesc(true);
@@ -398,7 +398,7 @@ export function IssuePanel() {
                     </div>
                   </div>
                 ) : issue.description ? (
-                  <div className="prose-sm mt-1.5 max-w-none rounded-md border border-stone-200 bg-stone-50/50 p-3 text-sm leading-relaxed text-stone-700 [&_a]:text-amber-700 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-stone-300 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-stone-200 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1">
+                  <div className="prose-sm mt-1.5 max-w-none rounded-md border border-border bg-muted/50/50 p-3 text-sm leading-relaxed text-foreground/90 [&_a]:text-amber-700 [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_li]:ml-4 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:my-1">
                     <ReactMarkdown>{issue.description}</ReactMarkdown>
                   </div>
                 ) : (
@@ -408,7 +408,7 @@ export function IssuePanel() {
                       setDescDraft("");
                       setEditingDesc(true);
                     }}
-                    className="mt-1.5 w-full rounded-md border border-dashed border-stone-300 px-3 py-4 text-left text-xs text-stone-400 hover:border-stone-400 hover:text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                    className="mt-1.5 w-full rounded-md border border-dashed border-border px-3 py-4 text-left text-xs text-muted-foreground/80 hover:border-stone-400 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
                   >
                     Add a description…
                   </button>
@@ -417,8 +417,8 @@ export function IssuePanel() {
 
               {/* Properties */}
               <section className="mt-5" aria-label="Properties">
-                <Label className="text-[11px] uppercase tracking-wide text-stone-400">Properties</Label>
-                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-stone-200 p-3">
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Properties</Label>
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border p-3">
                   <Field label="Status">
                     <Select value={issue.statusId} onValueChange={(v) => void patch({ statusId: v }, { silent: true })}>
                       <SelectTrigger size="sm" className="w-full" aria-label="Status">
@@ -541,10 +541,10 @@ export function IssuePanel() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className={cn("h-8 flex-1 justify-start font-normal", !issue.dueDate && "text-stone-400")}
+                            className={cn("h-8 flex-1 justify-start font-normal", !issue.dueDate && "text-muted-foreground/80")}
                             aria-label="Due date"
                           >
-                            <CalendarClock className="size-3.5 text-stone-400" aria-hidden />
+                            <CalendarClock className="size-3.5 text-muted-foreground/80" aria-hidden />
                             {issue.dueDate ? formatDate(issue.dueDate) : "Set date"}
                           </Button>
                         </PopoverTrigger>
@@ -620,7 +620,7 @@ export function IssuePanel() {
                               onClick={() => void toggleLabel(l.id)}
                               className={cn(
                                 "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
-                                active ? "border-transparent" : "border-stone-200 bg-white text-stone-500 hover:border-stone-300"
+                                active ? "border-transparent" : "border-border bg-card text-muted-foreground hover:border-border"
                               )}
                               style={active ? { backgroundColor: `${l.color}22`, color: l.color } : undefined}
                             >
@@ -628,12 +628,12 @@ export function IssuePanel() {
                             </button>
                           );
                         })}
-                        {labels.length === 0 && <span className="text-xs text-stone-400">No labels in workspace</span>}
+                        {labels.length === 0 && <span className="text-xs text-muted-foreground/80">No labels in workspace</span>}
                       </div>
                     </Field>
                   </div>
 
-                  <div className="col-span-2 grid grid-cols-2 gap-x-4 text-xs text-stone-400">
+                  <div className="col-span-2 grid grid-cols-2 gap-x-4 text-xs text-muted-foreground/80">
                     <span>Reporter: {issue.reporter?.name ?? "—"}</span>
                     <span>Created: {formatDate(issue.createdAt)}</span>
                   </div>
@@ -643,8 +643,8 @@ export function IssuePanel() {
               {/* Subtasks */}
               <section className="mt-5" aria-label="Subtasks">
                 <div className="flex items-center gap-2">
-                  <GitBranch className="size-3.5 text-stone-400" aria-hidden />
-                  <Label className="text-[11px] uppercase tracking-wide text-stone-400">
+                  <GitBranch className="size-3.5 text-muted-foreground/80" aria-hidden />
+                  <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
                     Subtasks {detail && detail.subtasks.length > 0 && `(${detail.subtasks.filter((s) => s.status.category === "DONE").length}/${detail.subtasks.length} done)`}
                   </Label>
                 </div>
@@ -655,14 +655,14 @@ export function IssuePanel() {
                         <button
                           type="button"
                           onClick={() => setOpenIssue(st.id)}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
                         >
                           <IssueTypeIcon type={st.type} size={12} />
                           <KeyBadge>{st.key}</KeyBadge>
-                          <span className={cn("min-w-0 flex-1 truncate", st.status.category === "DONE" && "text-stone-400 line-through")}>
+                          <span className={cn("min-w-0 flex-1 truncate", st.status.category === "DONE" && "text-muted-foreground/80 line-through")}>
                             {st.summary}
                           </span>
-                          <span className="text-[10px] text-stone-400">{st.status.name}</span>
+                          <span className="text-[10px] text-muted-foreground/80">{st.status.name}</span>
                         </button>
                       </li>
                     ))}
@@ -693,7 +693,7 @@ export function IssuePanel() {
 
               {/* Comments */}
               <section aria-label="Comments">
-                <Label className="text-[11px] uppercase tracking-wide text-stone-400">
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
                   Comments {detail ? `(${detail.comments.length})` : ""}
                 </Label>
                 <ul className="mt-3 space-y-4">
@@ -702,25 +702,25 @@ export function IssuePanel() {
                       <Avatar name={c.author.name} color={c.author.avatarColor} size="md" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-stone-800">{c.author.name}</span>
-                          <RelativeTime date={c.createdAt} className="text-[11px] text-stone-400" />
+                          <span className="text-sm font-semibold text-foreground">{c.author.name}</span>
+                          <RelativeTime date={c.createdAt} className="text-[11px] text-muted-foreground/80" />
                           {(me?.id === c.author.id || role === "ADMIN") && (
                             <button
                               type="button"
                               aria-label="Delete comment"
-                              className="ml-auto rounded p-1 text-stone-300 hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
+                              className="ml-auto rounded p-1 text-stone-300 hover:bg-rose-500/100/10 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
                               onClick={() => void deleteComment(c.id)}
                             >
                               <Trash2 className="size-3.5" aria-hidden />
                             </button>
                           )}
                         </div>
-                        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-stone-700">{c.body}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{c.body}</p>
                       </div>
                     </li>
                   ))}
                   {detail && detail.comments.length === 0 && (
-                    <li className="text-xs text-stone-400">No comments yet.</li>
+                    <li className="text-xs text-muted-foreground/80">No comments yet.</li>
                   )}
                 </ul>
 
@@ -756,9 +756,9 @@ export function IssuePanel() {
 
               {/* Activity */}
               <section aria-label="Activity">
-                <Label className="text-[11px] uppercase tracking-wide text-stone-400">Activity</Label>
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">Activity</Label>
                 {detail && detail.activity.length === 0 ? (
-                  <p className="mt-2 text-xs text-stone-400">No activity recorded yet.</p>
+                  <p className="mt-2 text-xs text-muted-foreground/80">No activity recorded yet.</p>
                 ) : (
                   <ol className="mt-3 space-y-0">
                     {detail?.activity.map((a: ActivityDTO) => {
@@ -766,26 +766,26 @@ export function IssuePanel() {
                       return (
                         <li key={a.id} className="relative flex gap-3 pb-4 last:pb-0">
                           {detail && detail.activity.indexOf(a) < detail.activity.length - 1 && (
-                            <span aria-hidden className="absolute left-[11px] top-6 h-[calc(100%-1rem)] w-px bg-stone-200" />
+                            <span aria-hidden className="absolute left-[11px] top-6 h-[calc(100%-1rem)] w-px bg-muted" />
                           )}
-                          <span className="z-10 mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-stone-100 ring-2 ring-white">
-                            <Icon className="size-3 text-stone-500" aria-hidden />
+                          <span className="z-10 mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted ring-2 ring-white">
+                            <Icon className="size-3 text-muted-foreground" aria-hidden />
                           </span>
                           <div className="min-w-0 flex-1 text-sm">
-                            <span className="font-medium text-stone-800">{a.user.name}</span>{" "}
-                            <span className="text-stone-500">
+                            <span className="font-medium text-foreground">{a.user.name}</span>{" "}
+                            <span className="text-muted-foreground">
                               {a.field
                                 ? `changed ${a.field}`
                                 : a.type.replace("issue.", "").replace(/_/g, " ")}
                             </span>
                             {a.oldValue != null && a.newValue != null && (
-                              <span className="text-stone-500">
-                                : <span className="text-stone-500">{a.oldValue}</span> <span aria-hidden>→</span>{" "}
-                                <span className="font-medium text-stone-700">{a.newValue}</span>
+                              <span className="text-muted-foreground">
+                                : <span className="text-muted-foreground">{a.oldValue}</span> <span aria-hidden>→</span>{" "}
+                                <span className="font-medium text-foreground/90">{a.newValue}</span>
                               </span>
                             )}
                             <div className="mt-0.5">
-                              <RelativeTime date={a.createdAt} className="text-[11px] text-stone-400" />
+                              <RelativeTime date={a.createdAt} className="text-[11px] text-muted-foreground/80" />
                             </div>
                           </div>
                         </li>
@@ -797,18 +797,18 @@ export function IssuePanel() {
             </div>
 
             {/* Footer actions */}
-            <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50/60 px-5 py-3">
+            <div className="flex items-center justify-between border-t border-border bg-muted/50 px-5 py-3">
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1.5 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                className="gap-1.5 text-rose-600 hover:bg-rose-500/100/10 hover:text-rose-700"
                 disabled={!canDelete}
                 title={canDelete ? "Delete issue" : "Only ADMIN/MANAGER can delete issues"}
                 onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 className="size-3.5" aria-hidden /> Delete
               </Button>
-              <span className="text-[11px] text-stone-400">
+              <span className="text-[11px] text-muted-foreground/80">
                 Updated <RelativeTime date={issue.updatedAt} />
               </span>
             </div>

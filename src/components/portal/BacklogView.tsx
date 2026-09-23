@@ -73,7 +73,7 @@ function SprintDateField({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button type="button" variant="outline" className="w-full justify-start font-normal" aria-label={label}>
-            <CalendarRange className="size-4 text-stone-400" aria-hidden />
+            <CalendarRange className="size-4 text-muted-foreground/80" aria-hidden />
             {value ? format(value, "MMM d, yyyy") : "Pick a date"}
           </Button>
         </PopoverTrigger>
@@ -274,7 +274,7 @@ function CompleteSprintDialog({
             {unfinished.length > 0 && (
               <>
                 {" "}
-                <span className="font-medium text-stone-700">
+                <span className="font-medium text-foreground/90">
                   {unfinished.length} unfinished issue{unfinished.length === 1 ? "" : "s"}
                 </span>{" "}
                 will move back to the backlog.
@@ -493,40 +493,40 @@ export function BacklogView() {
     const donePoints = issuesIn.reduce((acc, i) => (i.status.category === "DONE" ? acc + (i.storyPoints ?? 0) : acc), 0);
     return (
       <DropSection key={sprint.id} dropId={`sprint:${sprint.id}`} className="rounded-lg">
-        <section className="rounded-lg border border-stone-200 bg-white">
+        <section className="rounded-lg border border-border bg-card">
           <header className="flex flex-wrap items-center gap-2 px-4 py-3">
             <button
               type="button"
               aria-label={isCollapsed ? `Expand ${sprint.name}` : `Collapse ${sprint.name}`}
               aria-expanded={!isCollapsed}
               onClick={() => setCollapsed((c) => ({ ...c, [sprint.id]: !isCollapsed }))}
-              className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              className="rounded p-0.5 text-muted-foreground/80 hover:bg-muted hover:text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
             >
               {isCollapsed ? <ChevronRight className="size-4" aria-hidden /> : <ChevronDown className="size-4" aria-hidden />}
             </button>
-            <h3 className="text-sm font-semibold text-stone-900">{sprint.name}</h3>
+            <h3 className="text-sm font-semibold text-foreground">{sprint.name}</h3>
             <span
               className={cn(
                 "rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide",
                 sprint.status === "ACTIVE"
-                  ? "bg-amber-100 text-amber-800"
-                  : "bg-stone-100 text-stone-500"
+                  ? "bg-amber-100 text-amber-600"
+                  : "bg-muted text-muted-foreground"
               )}
             >
               {sprint.status}
             </span>
             {(sprint.startDate || sprint.endDate) && (
-              <span className="hidden items-center gap-1 text-xs text-stone-400 sm:flex">
+              <span className="hidden items-center gap-1 text-xs text-muted-foreground/80 sm:flex">
                 <CalendarRange className="size-3" aria-hidden />
                 {formatDateShort(sprint.startDate)} – {formatDateShort(sprint.endDate)}
               </span>
             )}
             {isCollapsed && (
-              <span className="flex items-center gap-1 text-xs text-stone-400">
+              <span className="flex items-center gap-1 text-xs text-muted-foreground/80">
                 <ListChecks className="size-3" aria-hidden /> {issuesIn.length}
               </span>
             )}
-            <span className="ml-auto text-xs text-stone-400">
+            <span className="ml-auto text-xs text-muted-foreground/80">
               {donePoints}/{points} pts · {issuesIn.length} issue{issuesIn.length === 1 ? "" : "s"}
             </span>
             <DropdownMenu>
@@ -559,12 +559,12 @@ export function BacklogView() {
             </DropdownMenu>
           </header>
           {sprint.goal && !isCollapsed && (
-            <p className="px-4 pb-2 text-xs text-stone-500">🎯 {sprint.goal}</p>
+            <p className="px-4 pb-2 text-xs text-muted-foreground">🎯 {sprint.goal}</p>
           )}
           {!isCollapsed && (
             <div className="max-h-[420px] space-y-2 overflow-y-auto px-4 pb-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
               {issuesIn.length === 0 ? (
-                <p className="rounded-md border border-dashed border-stone-200 px-3 py-4 text-center text-xs text-stone-400">
+                <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground/80">
                   Drag issues here from the backlog
                 </p>
               ) : (
@@ -583,8 +583,8 @@ export function BacklogView() {
     <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold text-stone-900">Backlog & sprints</h2>
-          <p className="text-xs text-stone-500">
+          <h2 className="text-base font-semibold text-foreground">Backlog & sprints</h2>
+          <p className="text-xs text-muted-foreground">
             Drag issues between the backlog and sprints to plan iterations.
           </p>
         </div>
@@ -611,18 +611,18 @@ export function BacklogView() {
 
           {/* Backlog section */}
           <DropSection dropId="backlog" className="rounded-lg">
-            <section className="rounded-lg border border-stone-200 bg-white">
+            <section className="rounded-lg border border-border bg-card">
               <header className="flex items-center gap-2 px-4 py-3">
-                <Square className="size-3.5 text-stone-400" aria-hidden />
-                <h3 className="text-sm font-semibold text-stone-900">Backlog</h3>
-                <span className="text-xs text-stone-400">
+                <Square className="size-3.5 text-muted-foreground/80" aria-hidden />
+                <h3 className="text-sm font-semibold text-foreground">Backlog</h3>
+                <span className="text-xs text-muted-foreground/80">
                   {sprintIssues.backlog.length} issue{sprintIssues.backlog.length === 1 ? "" : "s"}
                 </span>
               </header>
 
               {/* Inline create row */}
               {project.archived ? (
-                <p className="mx-4 mb-3 rounded-md bg-stone-50 px-3 py-2 text-xs text-stone-500">
+                <p className="mx-4 mb-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                   This project is archived — read-only.
                 </p>
               ) : (
@@ -663,7 +663,7 @@ export function BacklogView() {
 
               <div className="max-h-[520px] space-y-2 overflow-y-auto px-4 pb-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
                 {sprintIssues.backlog.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-stone-200 px-3 py-6 text-center text-xs text-stone-400">
+                  <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground/80">
                     Backlog is empty — add an issue above or drag one out of a sprint.
                   </p>
                 ) : (
@@ -677,19 +677,19 @@ export function BacklogView() {
 
           {/* Completed sprints (read-only) */}
           {completedSprints.length > 0 && (
-            <section className="rounded-lg border border-stone-200 bg-stone-50/60">
+            <section className="rounded-lg border border-border bg-muted/50">
               <header className="flex items-center gap-2 px-4 py-3">
                 <Zap className="size-3.5 text-emerald-600" aria-hidden />
-                <h3 className="text-sm font-semibold text-stone-600">Completed sprints</h3>
+                <h3 className="text-sm font-semibold text-muted-foreground">Completed sprints</h3>
               </header>
               <div className="space-y-1.5 px-4 pb-4">
                 {completedSprints.map((s) => {
                   const list = sprintIssues.map.get(s.id) ?? [];
                   const done = list.filter((i) => i.status.category === "DONE").length;
                   return (
-                    <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-md bg-white px-3 py-2 text-xs text-stone-500">
-                      <span className="font-medium text-stone-700">{s.name}</span>
-                      <span className="text-stone-400">
+                    <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-md bg-card px-3 py-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground/90">{s.name}</span>
+                      <span className="text-muted-foreground/80">
                         {done}/{list.length} done
                       </span>
                       <span className="ml-auto">{formatDateShort(s.endDate)}</span>

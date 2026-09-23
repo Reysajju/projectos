@@ -1,9 +1,11 @@
 "use client";
 
-import { Archive, ChevronRight, LayoutDashboard, LogOut, Menu, Settings, UserCircle2, Users } from "lucide-react";
+import React from "react";
+import { Archive, Check, ChevronRight, LayoutDashboard, LogOut, Menu, Monitor, Moon, Search, Settings, Sun, UserCircle2, Users, Zap } from "lucide-react";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
 
-import { api } from "@/lib/api-client";
+import { api, api2 } from "@/lib/api-client";
 import { usePortalStore, type PortalView } from "@/lib/portal-store";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./Avatar";
@@ -22,9 +24,47 @@ import { ProjectIcon } from "./IssueTypeIcon";
 const NAV: { view: PortalView; label: string; icon: typeof LayoutDashboard }[] = [
   { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { view: "projects", label: "Projects", icon: Archive },
+  { view: "search", label: "Search", icon: Search },
+  { view: "automations", label: "Automation", icon: Zap },
   { view: "team", label: "Team", icon: Users },
   { view: "settings", label: "Settings", icon: Settings },
 ];
+
+function ThemeMenuItems() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <>
+      <DropdownMenuItem
+        onSelect={(e) => {
+          e.preventDefault();
+          setTheme("light");
+        }}
+        data-checked={theme === "light"}
+      >
+        <Sun className="size-4" aria-hidden /> Light
+        {theme === "light" && <Check className="ml-auto size-3.5" aria-hidden />}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={(e) => {
+          e.preventDefault();
+          setTheme("dark");
+        }}
+      >
+        <Moon className="size-4" aria-hidden /> Dark
+        {theme === "dark" && <Check className="ml-auto size-3.5" aria-hidden />}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onSelect={(e) => {
+          e.preventDefault();
+          setTheme("system");
+        }}
+      >
+        <Monitor className="size-4" aria-hidden /> System
+        {theme === "system" && <Check className="ml-auto size-3.5" aria-hidden />}
+      </DropdownMenuItem>
+    </>
+  );
+}
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const org = usePortalStore((s) => s.org);
@@ -40,6 +80,22 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const projects = workspace?.projects ?? [];
   const activeProjects = projects.filter((p) => !p.archived);
   const archivedProjects = projects.filter((p) => p.archived);
+
+  // Saved JQL filters (lazy, refreshed when the sidebar mounts)
+  const [savedFilters, setSavedFilters] = React.useState<{ id: string; name: string; query: string }[]>([]);
+  React.useEffect(() => {
+    let alive = true;
+    api2
+      .filters()
+      .then((res) => {
+        if (alive) setSavedFilters(res.filters);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const openSearch = usePortalStore((s) => s.openSearch);
 
   async function handleLogout() {
     try {
@@ -100,7 +156,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      {/* Projects */}
+      {/* Projects + saved filters */}
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-2 pb-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-700 [&::-webkit-scrollbar]:w-1.5">
         <div className="px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-stone-500">
           Projects
@@ -154,6 +210,31 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </button>
           ))}
         </div>
+
+        {savedFilters.length > 0 && (
+          <>
+            <div className="px-3 pb-1.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-stone-500">
+              Saved filters
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {savedFilters.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  title={f.query}
+                  onClick={() => {
+                    openSearch(f.query);
+                    onNavigate?.();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm text-stone-400 transition-colors hover:bg-stone-800/70 hover:text-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                >
+                  <Search className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{f.name}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* User */}
@@ -181,6 +262,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                 <div className="text-sm font-medium text-stone-900">{me.name}</div>
                 <div className="text-xs text-stone-500">{me.email}</div>
               </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <ThemeMenuItems />
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => toast.info("Profile page coming soon")}>
                 <UserCircle2 className="size-4" aria-hidden /> Profile

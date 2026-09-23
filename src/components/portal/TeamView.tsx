@@ -50,11 +50,11 @@ const ROLES = ["ADMIN", "MANAGER", "MEMBER", "VIEWER"] as const;
 function roleBadgeClass(role: string): string {
   switch (role) {
     case "ADMIN":
-      return "bg-amber-100 text-amber-800";
+      return "bg-amber-100 text-amber-600";
     case "MANAGER":
-      return "bg-violet-100 text-violet-700";
+      return "bg-violet-500/15 text-violet-700 dark:text-violet-300";
     case "VIEWER":
-      return "bg-stone-100 text-stone-500";
+      return "bg-muted text-muted-foreground";
     default:
       return "bg-emerald-100 text-emerald-700";
   }
@@ -184,8 +184,8 @@ export function TeamView() {
     <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">Team</h1>
-          <p className="mt-1 text-sm text-stone-500">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Team</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {members.length} member{members.length === 1 ? "" : "s"} in {workspace?.org.name ?? "your workspace"}
           </p>
         </div>
@@ -199,9 +199,9 @@ export function TeamView() {
       {members.length === 0 ? (
         <EmptyState icon={Users} title="No members" hint="Invite teammates to collaborate on projects." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-stone-200">
+        <div className="overflow-hidden rounded-lg border border-border">
           <Table>
-            <TableHeader className="bg-stone-50">
+            <TableHeader className="bg-muted/50">
               <TableRow className="hover:bg-transparent">
                 <TableHead>Member</TableHead>
                 <TableHead className="hidden sm:table-cell">Email</TableHead>
@@ -216,21 +216,21 @@ export function TeamView() {
                     <div className="flex items-center gap-2.5">
                       <Avatar name={m.name} color={m.avatarColor} size="md" />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 text-sm font-medium text-stone-800">
+                        <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                           {m.name}
                           {me?.id === m.id && (
-                            <span className="rounded bg-stone-100 px-1 py-px text-[10px] font-semibold text-stone-500">you</span>
+                            <span className="rounded bg-muted px-1 py-px text-[10px] font-semibold text-muted-foreground">you</span>
                           )}
                         </div>
-                        <div className="text-xs text-stone-400 sm:hidden">{m.email}</div>
+                        <div className="text-xs text-muted-foreground/80 sm:hidden">{m.email}</div>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">
-                    <span className="text-xs text-stone-500">{m.email}</span>
+                    <span className="text-xs text-muted-foreground">{m.email}</span>
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
-                    <span className="text-xs text-stone-500">{m.title ?? "—"}</span>
+                    <span className="text-xs text-muted-foreground">{m.title ?? "—"}</span>
                   </TableCell>
                   <TableCell>
                     {isAdmin && me?.id !== m.id ? (
@@ -249,7 +249,7 @@ export function TeamView() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-40">
-                          <DropdownMenuLabel className="text-xs text-stone-500">Change role</DropdownMenuLabel>
+                          <DropdownMenuLabel className="text-xs text-muted-foreground">Change role</DropdownMenuLabel>
                           <DropdownMenuSeparator />
                           {ROLES.map((r) => (
                             <DropdownMenuItem
@@ -281,7 +281,7 @@ export function TeamView() {
         </div>
       )}
 
-      <p className="text-xs text-stone-400">
+      <p className="text-xs text-muted-foreground/80">
         {isAdmin
           ? "You can change member roles. ADMIN manages everything, MANAGER manages projects, MEMBER works on issues, VIEWER has read-only access."
           : "Roles are managed by workspace admins."}

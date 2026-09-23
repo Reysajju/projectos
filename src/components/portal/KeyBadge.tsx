@@ -6,7 +6,7 @@ export function KeyBadge({ children, className }: { children: string; className?
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded border border-stone-200 bg-stone-100 px-1.5 py-px font-mono text-[11px] font-medium tracking-tight text-stone-500",
+        "inline-flex shrink-0 items-center rounded border border-border bg-muted px-1.5 py-px font-mono text-[11px] font-medium tracking-tight text-muted-foreground",
         className
       )}
     >

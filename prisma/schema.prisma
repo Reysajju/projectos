@@ -30,6 +30,8 @@ model User {
   comments      Comment[]
   activities    Activity[]
   notifications Notification[]
+  savedFilters  SavedFilter[]       @relation("FilterOwner")
+  automationRules AutomationRule[] @relation("AutomationCreator")
 }
 
 model Session {
@@ -58,6 +60,8 @@ model Organization {
   labels        Label[]
   activities    Activity[]
   notifications Notification[]
+  savedFilters  SavedFilter[]
+  automationRules AutomationRule[]
 }
 
 model OrganizationMember {
@@ -258,4 +262,34 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+}
+
+// ─── Search & Automation engines (Phase 4+) ─────────────────────
+
+model SavedFilter {
+  id     String @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name   String
+  query  String // JQL-lite string
+  ownerId String
+  owner  User   @relation("FilterOwner", fields: [ownerId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model AutomationRule {
+  id        String    @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name      String
+  trigger   String // issue.created | issue.status_changed | issue.assigned | comment.created
+  conditions String // JSON [{field, operator, value}]
+  actions   String    // JSON [{type, value}]
+  enabled   Boolean   @default(true)
+  runCount  Int       @default(0)
+  lastRunAt DateTime?
+  lastRunResult String?
+  createdBy String
+  creator   User      @relation("AutomationCreator", fields: [createdBy], references: [id])
+  createdAt DateTime  @default(now())
 }

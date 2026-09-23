@@ -123,7 +123,7 @@ export function SearchPalette() {
       />
       <CommandList className="max-h-[360px]">
         {loading && (
-          <div className="flex items-center justify-center gap-2 py-6 text-sm text-stone-400">
+          <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground/80">
             <Loader2 className="size-4 animate-spin" aria-hidden /> Searching…
           </div>
         )}
@@ -131,10 +131,10 @@ export function SearchPalette() {
           <CommandEmpty>No results for “{query}”.</CommandEmpty>
         )}
         {!loading && query.trim().length < 2 && (
-          <div className="px-4 py-6 text-center text-xs text-stone-400">
+          <div className="px-4 py-6 text-center text-xs text-muted-foreground/80">
             <Search className="mx-auto mb-2 size-5 text-stone-300" aria-hidden />
-            Type at least 2 characters. Jump straight to an issue with its key (e.g. <span className="font-mono text-stone-500">WEB-12</span>) or filter with{" "}
-            <span className="font-mono text-stone-500">assignee:me</span>.
+            Type at least 2 characters. Jump straight to an issue with its key (e.g. <span className="font-mono text-muted-foreground">WEB-12</span>) or filter with{" "}
+            <span className="font-mono text-muted-foreground">assignee:me</span>.
           </div>
         )}
 
@@ -149,7 +149,7 @@ export function SearchPalette() {
                 <IssueTypeIcon type={exactIssue.type} size={13} />
                 <KeyBadge>{exactIssue.key}</KeyBadge>
                 <span className="min-w-0 flex-1 truncate">{exactIssue.summary}</span>
-                <CornerDownLeft className="size-3.5 text-stone-400" aria-hidden />
+                <CornerDownLeft className="size-3.5 text-muted-foreground/80" aria-hidden />
               </CommandItem>
             </CommandGroup>
             <CommandSeparator />
@@ -186,13 +186,13 @@ export function SearchPalette() {
                   className="gap-2"
                 >
                   {project.archived ? (
-                    <Square className="size-3.5 text-stone-400" aria-hidden />
+                    <Square className="size-3.5 text-muted-foreground/80" aria-hidden />
                   ) : (
-                    <FolderKanban className="size-3.5 text-stone-400" aria-hidden />
+                    <FolderKanban className="size-3.5 text-muted-foreground/80" aria-hidden />
                   )}
-                  <span className="shrink-0 font-mono text-[11px] text-stone-500">{project.key}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{project.key}</span>
                   <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  <span className="text-[10px] text-stone-400">{project.issueCount} issues</span>
+                  <span className="text-[10px] text-muted-foreground/80">{project.issueCount} issues</span>
                 </CommandItem>
               ))}
             </CommandGroup>

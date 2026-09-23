@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify, notifyMentions } from "@/lib/workflow";
+import { runAutomations } from "@/lib/automation";
 import { toCommentDTO } from "@/lib/dto";
 import { canWrite, clip, forbidden, handle, notFound, parseBody, reqStr, unauthorized } from "@/lib/api-helpers";
 
@@ -68,6 +69,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       members: members
         .filter((m) => m.userId !== session.user.id)
         .map((m) => ({ userId: m.userId, user: { name: m.user.name } })),
+    });
+
+    void runAutomations("comment.created", {
+      orgId,
+      issueId: issue.id,
+      actor: { id: session.user.id, name: session.user.name },
+      commentBody: text,
     });
 
     return NextResponse.json(toCommentDTO(comment));

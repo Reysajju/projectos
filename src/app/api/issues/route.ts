@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { logActivity, notify } from "@/lib/workflow";
+import { runAutomations } from "@/lib/automation";
 import { issueInclude, toIssueDTO } from "@/lib/dto";
 import {
   ApiError,
@@ -137,6 +138,12 @@ export async function POST(req: NextRequest) {
         issueId: created.id,
       });
     }
+
+    void runAutomations("issue.created", {
+      orgId,
+      issueId: created.id,
+      actor: { id: session.user.id, name: session.user.name },
+    });
 
     return NextResponse.json(toIssueDTO(created));
   });

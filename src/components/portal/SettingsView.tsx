@@ -108,8 +108,8 @@ export function SettingsView() {
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">Settings</h1>
-        <p className="mt-1 text-sm text-stone-500">Organization and project configuration.</p>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">Settings</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Organization and project configuration.</p>
       </div>
 
       {/* Org card */}
@@ -126,19 +126,19 @@ export function SettingsView() {
                 {org.name[0]?.toUpperCase() ?? "O"}
               </div>
               <div>
-                <div className="text-sm font-semibold text-stone-900">{org.name}</div>
+                <div className="text-sm font-semibold text-foreground">{org.name}</div>
                 <button
                   type="button"
                   onClick={copySlug}
                   aria-label="Copy organization slug"
-                  className="mt-0.5 inline-flex items-center gap-1 rounded bg-stone-100 px-1.5 py-px font-mono text-[11px] text-stone-500 transition-colors hover:bg-stone-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                  className="mt-0.5 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-px font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
                 >
                   /org/{org.slug}
                   {copied ? <Check className="size-3 text-emerald-600" aria-hidden /> : <Copy className="size-3" aria-hidden />}
                 </button>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-xs text-stone-500">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <FolderKanban className="size-3.5" aria-hidden />
                 {projects.length} projects
@@ -150,9 +150,9 @@ export function SettingsView() {
             </div>
           </div>
           <Separator />
-          <div className="flex items-center justify-between text-xs text-stone-500">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>Your role</span>
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600">
               {workspace.role}
             </span>
           </div>
@@ -189,7 +189,7 @@ export function SettingsView() {
 
           {project ? (
             <>
-              <div className="rounded-lg border border-stone-200 p-4">
+              <div className="rounded-lg border border-border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex items-start gap-3">
                     <span
@@ -200,15 +200,15 @@ export function SettingsView() {
                       <FolderKanban className="size-4" />
                     </span>
                     <div>
-                      <div className="text-sm font-semibold text-stone-900">
+                      <div className="text-sm font-semibold text-foreground">
                         {project.name}
-                        <span className="ml-2 rounded bg-stone-100 px-1.5 py-px font-mono text-[11px] font-medium text-stone-500">
+                        <span className="ml-2 rounded bg-muted px-1.5 py-px font-mono text-[11px] font-medium text-muted-foreground">
                           {project.key}
                         </span>
                       </div>
-                      <p className="mt-0.5 text-xs text-stone-500">{project.description || "No description"}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{project.description || "No description"}</p>
                       {project.lead && (
-                        <div className="mt-1.5 flex items-center gap-1.5 text-xs text-stone-500">
+                        <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                           <Avatar name={project.lead.name} color={project.lead.avatarColor} size="xs" />
                           Lead: {project.lead.name}
                         </div>
@@ -221,10 +221,10 @@ export function SettingsView() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border border-stone-200 p-3">
+              <div className="flex items-center justify-between rounded-lg border border-border p-3">
                 <div className="space-y-0.5">
-                  <Label className="text-sm font-medium text-stone-800">Archived</Label>
-                  <p className="text-xs text-stone-500">Archived projects are hidden from the projects list and read-only.</p>
+                  <Label className="text-sm font-medium text-foreground">Archived</Label>
+                  <p className="text-xs text-muted-foreground">Archived projects are hidden from the projects list and read-only.</p>
                 </div>
                 <Switch
                   checked={project.archived}
@@ -235,13 +235,13 @@ export function SettingsView() {
               </div>
 
               {isAdmin && (
-                <div className="rounded-lg border border-rose-200 p-3">
+                <div className="rounded-lg border border-rose-500/30 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-start gap-2">
                       <TriangleAlert className="mt-0.5 size-4 shrink-0 text-rose-600" aria-hidden />
                       <div className="space-y-0.5">
-                        <div className="text-sm font-medium text-stone-800">Delete project</div>
-                        <p className="text-xs text-stone-500">Permanently removes {project.key} and all of its issues.</p>
+                        <div className="text-sm font-medium text-foreground">Delete project</div>
+                        <p className="text-xs text-muted-foreground">Permanently removes {project.key} and all of its issues.</p>
                       </div>
                     </div>
                     <AlertDialog>
@@ -277,7 +277,7 @@ export function SettingsView() {
               )}
             </>
           ) : (
-            <p className="rounded-lg border border-dashed border-stone-300 px-4 py-6 text-center text-xs text-stone-400">
+            <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground/80">
               {projects.length ? "Select a project above to configure it." : "Create a project first."}
             </p>
           )}

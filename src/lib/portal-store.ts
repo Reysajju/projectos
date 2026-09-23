@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { api } from "./api-client";
 import type { NotificationDTO, OrgDTO, UserDTO, WorkspacePayload } from "./portal-types";
 
-export type PortalView = "dashboard" | "projects" | "project" | "team" | "settings";
+export type PortalView = "dashboard" | "projects" | "project" | "team" | "settings" | "search" | "automations";
 export type ProjectTab = "board" | "backlog" | "issues" | "reports" | "settings";
 
 export type CreateIssueContext =
@@ -46,6 +46,11 @@ interface PortalState {
 
   createProjectOpen: boolean;
   setCreateProjectOpen: (open: boolean) => void;
+
+  /** Query preseeded when opening the advanced search view from elsewhere. */
+  searchSeedQuery: string | null;
+  openSearch: (query?: string) => void;
+  clearSearchSeed: () => void;
 
   searchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
@@ -127,6 +132,10 @@ export const usePortalStore = create<PortalState>((set, get) => ({
   createIssue: null,
   openCreateIssue: (ctx) => set({ createIssue: ctx ?? { kind: "global" } }),
   closeCreateIssue: () => set({ createIssue: null }),
+
+  searchSeedQuery: null,
+  openSearch: (query) => set({ view: "search", searchSeedQuery: query ?? null }),
+  clearSearchSeed: () => set({ searchSeedQuery: null }),
 
   createProjectOpen: false,
   setCreateProjectOpen: (open) => set({ createProjectOpen: open }),

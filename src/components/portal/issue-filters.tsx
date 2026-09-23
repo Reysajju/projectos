@@ -127,7 +127,7 @@ export function FilterBar({
           ))}
         </SelectContent>
       </Select>
-      <Label className="flex h-8 items-center gap-2 rounded-md border border-stone-200 bg-white px-2.5 text-xs font-normal text-stone-600">
+      <Label className="flex h-8 items-center gap-2 rounded-md border border-border bg-card px-2.5 text-xs font-normal text-muted-foreground">
         <Switch
           checked={filters.onlyMine}
           onCheckedChange={(v) => patch({ onlyMine: v })}
@@ -142,7 +142,7 @@ export function FilterBar({
         <button
           type="button"
           onClick={() => patch(EMPTY_FILTERS)}
-          className="h-8 rounded-md px-2 text-xs text-stone-500 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+          className="h-8 rounded-md px-2 text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         >
           <Filter className="mr-1 inline size-3" aria-hidden /> Clear
         </button>

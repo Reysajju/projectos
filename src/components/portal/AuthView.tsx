@@ -143,7 +143,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
             <div className="flex size-9 items-center justify-center rounded-lg bg-amber-600 text-base font-bold text-white">
               P
             </div>
-            <span className="text-lg font-semibold text-stone-900">ProjectOS</span>
+            <span className="text-lg font-semibold text-foreground">ProjectOS</span>
           </div>
 
           <Tabs defaultValue="login">
@@ -159,15 +159,15 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
             {/* ── Login ── */}
             <TabsContent value="login">
               <form
-                className="space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
+                className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
                 onSubmit={(e) => {
                   e.preventDefault();
                   void doLogin(email.trim(), password, "login");
                 }}
               >
                 <div>
-                  <h2 className="text-lg font-semibold text-stone-900">Welcome back</h2>
-                  <p className="mt-1 text-sm text-stone-500">
+                  <h2 className="text-lg font-semibold text-foreground">Welcome back</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     Log in to your organization workspace.
                   </p>
                 </div>
@@ -200,22 +200,22 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                   Log in
                 </Button>
                 <div className="relative py-1 text-center">
-                  <span className="relative z-10 bg-white px-3 text-xs uppercase tracking-wide text-stone-400">
+                  <span className="relative z-10 bg-card px-3 text-xs uppercase tracking-wide text-muted-foreground/80">
                     or
                   </span>
-                  <span aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-stone-200" />
+                  <span aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-muted" />
                 </div>
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full gap-2 border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 hover:text-amber-900"
+                  className="w-full gap-2 border-amber-300 bg-amber-500/10 text-amber-600 hover:bg-amber-100 hover:text-amber-900"
                   disabled={busy !== null}
                   onClick={() => void doLogin("sarah@acme.dev", "demo1234", "demo")}
                 >
                   {busy === "demo" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
                   Try demo account
                 </Button>
-                <p className="text-center text-xs text-stone-400">
+                <p className="text-center text-xs text-muted-foreground/80">
                   Demo org “Acme Corp” — seeded projects, sprints & reports.
                 </p>
               </form>
@@ -224,12 +224,12 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
             {/* ── Sign up ── */}
             <TabsContent value="signup">
               <form
-                className="space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
+                className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
                 onSubmit={doSignup}
               >
                 <div>
-                  <h2 className="text-lg font-semibold text-stone-900">Create your workspace</h2>
-                  <p className="mt-1 text-sm text-stone-500">
+                  <h2 className="text-lg font-semibold text-foreground">Create your workspace</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     You&apos;ll be the organization admin.
                   </p>
                 </div>
@@ -285,7 +285,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                 <div className="space-y-2">
                   <Label htmlFor="su-slug">Workspace URL slug</Label>
                   <div className="flex items-center gap-2">
-                    <span className="shrink-0 rounded-md border border-stone-200 bg-stone-50 px-2 py-2 font-mono text-xs text-stone-500">
+                    <span className="shrink-0 rounded-md border border-border bg-muted/50 px-2 py-2 font-mono text-xs text-muted-foreground">
                       /org/
                     </span>
                     <Input
@@ -309,7 +309,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                   )}
                   Create workspace
                 </Button>
-                <p className="text-center text-xs text-stone-400">
+                <p className="text-center text-xs text-muted-foreground/80">
                   A workspace with default issue types, statuses &amp; priorities is provisioned automatically.
                 </p>
               </form>

@@ -19,8 +19,8 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
   return (
     <div
       className={cn(
-        "rounded-lg border border-stone-200 bg-white p-3 shadow-sm transition-shadow",
-        !dragging && "hover:border-stone-300 hover:shadow",
+        "rounded-lg border border-border bg-card p-3 shadow-sm transition-shadow",
+        !dragging && "hover:border-border hover:shadow",
         dragging && "rotate-2 shadow-lg ring-2 ring-amber-500/40"
       )}
     >
@@ -41,7 +41,7 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
 
       <div className="flex items-start gap-2">
         <IssueTypeIcon type={issue.type} className="mt-0.5" />
-        <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-snug text-stone-800">
+        <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-snug text-foreground">
           {issue.summary}
         </p>
       </div>
@@ -58,13 +58,13 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
           </span>
         )}
         {issue.subtaskCount > 0 && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-stone-400" title="Subtasks">
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/80" title="Subtasks">
             <GitBranch className="size-3" aria-hidden />
             {issue.subtasksDone}/{issue.subtaskCount}
           </span>
         )}
         {issue.commentCount > 0 && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-stone-400" title={`${issue.commentCount} comments`}>
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/80" title={`${issue.commentCount} comments`}>
             <MessageSquare className="size-3" aria-hidden />
             {issue.commentCount}
           </span>
@@ -76,8 +76,8 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
               isOverdue(issue.dueDate)
                 ? "bg-rose-100 font-medium text-rose-700"
                 : dueSoon
-                  ? "bg-amber-100 font-medium text-amber-800"
-                  : "text-stone-400"
+                  ? "bg-amber-100 font-medium text-amber-600"
+                  : "text-muted-foreground/80"
             )}
           >
             <CalendarClock className="size-3" aria-hidden />
@@ -91,7 +91,7 @@ export function IssueCardBody({ issue, dragging }: { issue: IssueDTO; dragging?:
         {issue.assignee ? (
           <Avatar name={issue.assignee.name} color={issue.assignee.avatarColor} size="sm" />
         ) : (
-          <span className="flex size-6 items-center justify-center rounded-full border border-dashed border-stone-300 text-[9px] text-stone-400">
+          <span className="flex size-6 items-center justify-center rounded-full border border-dashed border-border text-[9px] text-muted-foreground/80">
             ?
           </span>
         )}

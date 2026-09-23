@@ -101,19 +101,19 @@ function ProjectSettingsTab() {
           <div className="flex items-center gap-3">
             <ProjectIcon icon={project.icon} color={project.color} size={18} />
             <div>
-              <div className="text-sm font-semibold text-stone-900">
+              <div className="text-sm font-semibold text-foreground">
                 {project.name}{" "}
-                <span className="ml-1 rounded bg-stone-100 px-1.5 py-px font-mono text-[11px] font-medium text-stone-500">
+                <span className="ml-1 rounded bg-muted px-1.5 py-px font-mono text-[11px] font-medium text-muted-foreground">
                   {project.key}
                 </span>
               </div>
-              <p className="text-xs text-stone-500">{project.description || "No description"}</p>
+              <p className="text-xs text-muted-foreground">{project.description || "No description"}</p>
             </div>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-stone-200 p-3">
+          <div className="flex items-center justify-between rounded-lg border border-border p-3">
             <div>
-              <div className="text-sm font-medium text-stone-800">Project lead</div>
-              <div className="mt-1 flex items-center gap-2 text-xs text-stone-500">
+              <div className="text-sm font-medium text-foreground">Project lead</div>
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                 {project.lead ? (
                   <>
                     <Avatar name={project.lead.name} color={project.lead.avatarColor} size="xs" />
@@ -128,12 +128,12 @@ function ProjectSettingsTab() {
               Edit project
             </Button>
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-stone-200 p-3">
+          <div className="flex items-center justify-between rounded-lg border border-border p-3">
             <div className="space-y-0.5">
-              <Label htmlFor="archive-toggle" className="text-sm font-medium text-stone-800">
+              <Label htmlFor="archive-toggle" className="text-sm font-medium text-foreground">
                 Archived
               </Label>
-              <p className="text-xs text-stone-500">Archived projects are read-only and hidden from the main list.</p>
+              <p className="text-xs text-muted-foreground">Archived projects are read-only and hidden from the main list.</p>
             </div>
             <Switch
               id="archive-toggle"
@@ -146,17 +146,17 @@ function ProjectSettingsTab() {
       </Card>
 
       {isAdmin && (
-        <Card className="border-rose-200">
+        <Card className="border-rose-500/30">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base text-rose-700">
               <TriangleAlert className="size-4" aria-hidden /> Danger zone
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-between rounded-lg border border-rose-200 p-3">
+            <div className="flex items-center justify-between rounded-lg border border-rose-500/30 p-3">
               <div className="space-y-0.5">
-                <div className="text-sm font-medium text-stone-800">Delete this project</div>
-                <p className="text-xs text-stone-500">
+                <div className="text-sm font-medium text-foreground">Delete this project</div>
+                <p className="text-xs text-muted-foreground">
                   Permanently removes {project.key}, all its issues, sprints and history. This cannot be undone.
                 </p>
               </div>
@@ -221,8 +221,8 @@ function ProjectViewInner() {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-sm text-center">
-          <p className="text-sm font-medium text-stone-800">Couldn&apos;t load this project</p>
-          <p className="mt-1 text-xs text-stone-500">{error}</p>
+          <p className="text-sm font-medium text-foreground">Couldn&apos;t load this project</p>
+          <p className="mt-1 text-xs text-muted-foreground">{error}</p>
         </div>
       </div>
     );
@@ -231,24 +231,24 @@ function ProjectViewInner() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="shrink-0 border-b border-stone-200 bg-white px-4 pb-0 pt-4 sm:px-6">
+      <div className="shrink-0 border-b border-border bg-card px-4 pb-0 pt-4 sm:px-6">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 pb-3">
           {project ? (
             <>
               <ProjectIcon icon={project.icon} color={project.color} size={18} />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h1 className="truncate text-lg font-semibold tracking-tight text-stone-900">{project.name}</h1>
-                  <span className="hidden rounded bg-stone-100 px-1.5 py-px font-mono text-[11px] font-semibold text-stone-500 sm:inline">
+                  <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{project.name}</h1>
+                  <span className="hidden rounded bg-muted px-1.5 py-px font-mono text-[11px] font-semibold text-muted-foreground sm:inline">
                     {project.key}
                   </span>
                   {project.archived && (
-                    <span className="flex items-center gap-1 rounded bg-stone-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    <span className="flex items-center gap-1 rounded bg-muted px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       <ArchiveRestore className="size-3" aria-hidden /> Archived
                     </span>
                   )}
                 </div>
-                <div className="mt-0.5 flex items-center gap-2 text-xs text-stone-500">
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                   {project.lead && (
                     <>
                       <Avatar name={project.lead.name} color={project.lead.avatarColor} size="xs" />
