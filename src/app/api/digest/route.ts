@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { buildDigest, sendEmail, type DigestKind } from "@/lib/digest";
+import { buildDigest, type DigestKind } from "@/lib/digest";
+import { sendDigestEmail } from "@/lib/mailer";
 import { ApiError, canManage, handle, parseBody, unauthorized } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
@@ -65,24 +66,28 @@ export async function POST(req: NextRequest) {
     if (targets.length === 0) throw new ApiError("No recipients matched", 400);
 
     let sent = 0;
+    const deliveryStatuses: string[] = [];
     for (const t of targets) {
       const digest = await buildDigest(session.org.id, t.id, kind);
-      await sendEmail({
+      const result = await sendDigestEmail({
         orgId: session.org.id,
         userId: t.id,
         toEmail: t.email,
-        kind: kind === "DAILY" ? "DAILY_DIGEST" : "WEEKLY_DIGEST",
-        subject: digest.subject,
-        body: digest.text,
+        recipientName: digest.recipientName,
+        periodLabel: digest.periodLabel,
+        kind,
+        sections: digest.sections,
+        counts: digest.counts,
         meta: {
           trigger: "manual",
           sentBy: session.user.email,
           counts: digest.counts,
         },
       });
+      deliveryStatuses.push(result.status);
       sent += 1;
     }
 
-    return NextResponse.json({ sent, kind });
+    return NextResponse.json({ sent, kind, statuses: deliveryStatuses });
   });
 }

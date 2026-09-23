@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Bell,
+  ArrowLeft,
   CheckCircle2,
   Columns3,
+  KeyRound,
   Loader2,
   LogIn,
+  MailCheck,
   ShieldCheck,
   Sparkles,
   UserPlus,
@@ -15,11 +17,14 @@ import {
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
+import { BrandLockup, BrandMark } from "./BrandMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AuthPayload } from "@/lib/portal-types";
+
+type Mode = "auth" | "claim" | "claim-invalid" | "forgot" | "forgot-sent" | "reset";
 
 function slugify(name: string): string {
   return name
@@ -32,12 +37,38 @@ function slugify(name: string): string {
 const FEATURES = [
   { icon: Columns3, text: "Kanban boards, sprints & backlog planning" },
   { icon: Zap, text: "Workflow engine with audit trail & automations" },
-  { icon: Bell, text: "Real-time notifications and @mentions" },
+  { icon: MailCheck, text: "Email on invites, assignments, comments & digests" },
   { icon: ShieldCheck, text: "Multi-tenant workspaces with role-based access" },
 ] as const;
 
+/** Reads ?claim= / ?reset= from the URL once on mount. */
+function useTokenParam(): { claimToken: string | null; resetToken: string | null } {
+  return useMemo(() => {
+    if (typeof window === "undefined") return { claimToken: null, resetToken: null };
+    const params = new URLSearchParams(window.location.search);
+    return {
+      claimToken: params.get("claim"),
+      resetToken: params.get("reset"),
+    };
+  }, []);
+}
+
 export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => void }) {
-  const [busy, setBusy] = useState<"login" | "signup" | "demo" | null>(null);
+  const { claimToken, resetToken } = useTokenParam();
+  const [mode, setMode] = useState<Mode>(claimToken ? "claim" : resetToken ? "reset" : "auth");
+
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // claim
+  const [claimName, setClaimName] = useState("");
+  const [claimPassword, setClaimPassword] = useState("");
+  const [claimChecked, setClaimChecked] = useState(!claimToken);
+
+  // reset
+  const [resetPassword, setResetPassword] = useState("");
+
+  // forgot
+  const [fpEmail, setFpEmail] = useState("");
 
   // login
   const [email, setEmail] = useState("");
@@ -50,6 +81,31 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
+
+  // ── Validate claim token ──
+  useEffect(() => {
+    if (!claimToken) return;
+    let alive = true;
+    api
+      .claimInfo(claimToken)
+      .then((info) => {
+        if (!alive) return;
+        if (info.valid) {
+          setClaimName(info.name ?? "");
+          setClaimChecked(true);
+        } else {
+          setMode("claim-invalid");
+        }
+      })
+      .catch(() => alive && setMode("claim-invalid"));
+    return () => {
+      alive = false;
+    };
+  }, [claimToken]);
+
+  function cleanUrl() {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
 
   async function doLogin(emailVal: string, passwordVal: string, kind: "login" | "demo") {
     setBusy(kind);
@@ -88,6 +144,234 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
     }
   }
 
+  async function doClaim(e: React.FormEvent) {
+    e.preventDefault();
+    if (!claimToken) return;
+    setBusy("claim");
+    try {
+      const payload = await api.claimAccount({
+        token: claimToken,
+        name: claimName.trim() || undefined,
+        password: claimPassword,
+      });
+      cleanUrl();
+      toast.success(`Account ready — welcome, ${payload.user.name.split(" ")[0]}!`);
+      onAuthed(payload);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not set up your account");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doReset(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resetToken) return;
+    setBusy("reset");
+    try {
+      const payload = await api.resetPassword({ token: resetToken, password: resetPassword });
+      cleanUrl();
+      toast.success("Password updated — you are signed in.");
+      onAuthed(payload);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reset password");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy("forgot");
+    try {
+      await api.forgotPassword({ email: fpEmail.trim() });
+      setMode("forgot-sent");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Standalone flows (claim / reset / forgot)
+  // ────────────────────────────────────────────────────────────
+  if (mode !== "auth") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-md">
+          <button
+            type="button"
+            onClick={() => setMode("auth")}
+            className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" aria-hidden /> Back to log in
+          </button>
+
+          {/* Claim invitation */}
+          {mode === "claim" && (
+            <form
+              className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
+              onSubmit={doClaim}
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30">
+                  <UserPlus className="size-5 text-amber-600" aria-hidden />
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Join your team</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {claimChecked
+                      ? "You've been invited to a ProjectOS workspace. Choose a password to activate your account."
+                      : "Validating your invitation link…"}
+                  </p>
+                </div>
+              </div>
+              {claimChecked && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="claim-name">Your name</Label>
+                    <Input
+                      id="claim-name"
+                      required
+                      placeholder="Ada Lovelace"
+                      value={claimName}
+                      onChange={(e) => setClaimName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="claim-password">Choose a password</Label>
+                    <Input
+                      id="claim-password"
+                      type="password"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                      value={claimPassword}
+                      onChange={(e) => setClaimPassword(e.target.value)}
+                    />
+                  </div>
+                  <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
+                    {busy === "claim" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CheckCircle2 className="size-4" aria-hidden />}
+                    Activate account
+                  </Button>
+                </>
+              )}
+            </form>
+          )}
+
+          {mode === "claim-invalid" && (
+            <div className="space-y-4 rounded-lg border border-border bg-card p-6 text-center shadow-sm">
+              <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-rose-500/10">
+                <KeyRound className="size-6 text-rose-600" aria-hidden />
+              </div>
+              <h2 className="text-lg font-semibold text-foreground">Invitation link expired</h2>
+              <p className="text-sm text-muted-foreground">
+                This link is invalid, already used, or older than 7 days. Ask your workspace admin to
+                resend the invitation from <strong>Team → member menu → Resend invite</strong>.
+              </p>
+              <Button variant="outline" className="w-full" onClick={() => setMode("auth")}>
+                Go to log in
+              </Button>
+            </div>
+          )}
+
+          {/* Reset password */}
+          {mode === "reset" && (
+            <form
+              className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
+              onSubmit={doReset}
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30">
+                  <KeyRound className="size-5 text-amber-600" aria-hidden />
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Choose a new password</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Pick something strong — you&apos;ll be signed in automatically afterwards.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-password">New password</Label>
+                <Input
+                  id="reset-password"
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  placeholder="At least 8 characters"
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                />
+              </div>
+              <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
+                {busy === "reset" && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                Update password
+              </Button>
+            </form>
+          )}
+
+          {/* Forgot password */}
+          {(mode === "forgot" || mode === "forgot-sent") && (
+            <div className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
+              {mode === "forgot" ? (
+                <form className="space-y-4" onSubmit={doForgot}>
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30">
+                      <KeyRound className="size-5 text-amber-600" aria-hidden />
+                    </span>
+                    <div>
+                      <h2 className="text-lg font-semibold text-foreground">Forgot your password?</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Enter your email and we&apos;ll send a reset link (valid for 1 hour).
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="fp-email">Email</Label>
+                    <Input
+                      id="fp-email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      placeholder="you@company.com"
+                      value={fpEmail}
+                      onChange={(e) => setFpEmail(e.target.value)}
+                    />
+                  </div>
+                  <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
+                    {busy === "forgot" && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                    Send reset link
+                  </Button>
+                </form>
+              ) : (
+                <div className="space-y-4 text-center">
+                  <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
+                    <MailCheck className="size-6 text-emerald-600" aria-hidden />
+                  </div>
+                  <h2 className="text-lg font-semibold text-foreground">Check your inbox</h2>
+                  <p className="text-sm text-muted-foreground">
+                    If an account exists for <strong>{fpEmail}</strong>, a password-reset link is on
+                    its way. It expires in one hour.
+                  </p>
+                  <Button variant="outline" className="w-full" onClick={() => setMode("auth")}>
+                    Back to log in
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Standard log in / sign up
+  // ────────────────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen bg-background">
       {/* Brand panel */}
@@ -101,15 +385,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
           className="pointer-events-none absolute -bottom-32 -left-16 size-96 rounded-full bg-amber-600/5 blur-3xl"
         />
 
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-amber-600 text-lg font-bold text-white shadow-lg shadow-amber-600/20">
-            P
-          </div>
-          <div>
-            <div className="text-lg font-semibold tracking-tight">ProjectOS</div>
-            <div className="text-xs text-stone-400">Project Management Portal</div>
-          </div>
-        </div>
+        <BrandLockup size={40} dark />
 
         <div className="relative">
           <h1 className="max-w-md text-3xl font-semibold leading-tight tracking-tight">
@@ -132,7 +408,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
         </div>
 
         <p className="relative text-xs text-stone-500">
-          © {new Date().getFullYear()} ProjectOS · Multi-tenant demo workspace
+          © {new Date().getFullYear()} ProjectOS · Self-hosted project management
         </p>
       </aside>
 
@@ -140,10 +416,10 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
       <main className="flex flex-1 items-center justify-center px-4 py-10">
         <div className="w-full max-w-md">
           <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-amber-600 text-base font-bold text-white">
-              P
-            </div>
-            <span className="text-lg font-semibold text-foreground">ProjectOS</span>
+            <BrandMark size={36} />
+            <span className="text-lg font-semibold text-foreground">
+              Project<span className="text-amber-600">OS</span>
+            </span>
           </div>
 
           <Tabs defaultValue="login">
@@ -184,7 +460,16 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="login-password">Password</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="login-password">Password</Label>
+                    <button
+                      type="button"
+                      onClick={() => setMode("forgot")}
+                      className="text-xs font-medium text-amber-600 transition-colors hover:text-amber-700"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                   <Input
                     id="login-password"
                     type="password"

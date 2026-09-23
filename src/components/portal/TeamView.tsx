@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, ShieldCheck, UserPlus, Users } from "lucide-react";
+import {
+  Copy,
+  Loader2,
+  MailCheck,
+  MailWarning,
+  SendHorizontal,
+  ShieldCheck,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
@@ -67,6 +76,11 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<string>("MEMBER");
   const [busy, setBusy] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{
+    emailStatus: string | null;
+    claimToken: string | null;
+    memberName: string;
+  } | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -78,18 +92,40 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
         role,
         title: title.trim() || undefined,
       });
-      toast.success(`${member.name || member.email} added to the workspace`);
+      setInviteResult({
+        emailStatus: member.emailStatus ?? null,
+        claimToken: member.claimToken ?? null,
+        memberName: member.name || member.email,
+      });
+      if (member.emailStatus === "SENT") {
+        toast.success(`Invitation emailed to ${member.email}`);
+      } else if (member.emailStatus === "SIMULATED") {
+        toast.info(`${member.name || member.email} added — SMTP off, copy the invite link below`);
+      } else if (member.emailStatus === "FAILED") {
+        toast.error(`${member.name || member.email} added, but the email failed to send`);
+      } else {
+        toast.success(`${member.name || member.email} added to the workspace`);
+      }
       await refreshWorkspace();
       setEmail("");
       setName("");
       setTitle("");
       setRole("MEMBER");
-      onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to invite member");
     } finally {
       setBusy(false);
     }
+  }
+
+  function copyClaimLink() {
+    if (!inviteResult?.claimToken) return;
+    const base = window.location.origin;
+    const link = `${base}/?claim=${encodeURIComponent(inviteResult.claimToken)}`;
+    void navigator.clipboard
+      .writeText(link)
+      .then(() => toast.success("Invite link copied"))
+      .catch(() => toast.error("Could not copy the link"));
   }
 
   return (
@@ -100,56 +136,122 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
             <UserPlus className="size-4 text-amber-600" aria-hidden /> Add team member
           </DialogTitle>
           <DialogDescription>
-            New members get access to all projects in this organization.
+            New members get access to all projects in this organization. An invitation email is
+            sent automatically.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="invite-email">Email</Label>
-            <Input
-              id="invite-email"
-              type="email"
-              required
-              placeholder="teammate@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
+        {inviteResult ? (
+          <div className="space-y-4 py-1">
+            <div
+              className={cn(
+                "flex items-start gap-3 rounded-lg border p-3",
+                inviteResult.emailStatus === "SENT"
+                  ? "border-emerald-500/30 bg-emerald-500/5"
+                  : inviteResult.emailStatus === "FAILED"
+                    ? "border-rose-500/30 bg-rose-500/5"
+                    : "border-amber-500/30 bg-amber-500/5"
+              )}
+            >
+              {inviteResult.emailStatus === "SENT" ? (
+                <MailCheck className="mt-0.5 size-5 shrink-0 text-emerald-600" aria-hidden />
+              ) : (
+                <MailWarning className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden />
+              )}
+              <div className="min-w-0 text-sm">
+                {inviteResult.emailStatus === "SENT" ? (
+                  <>
+                    <p className="font-medium text-foreground">Invitation emailed</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      {inviteResult.memberName} received a link to set their password.
+                    </p>
+                  </>
+                ) : inviteResult.emailStatus === "FAILED" ? (
+                  <>
+                    <p className="font-medium text-foreground">Email delivery failed</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      The member was added, but SMTP rejected the message. Check Settings → Email
+                      delivery, or copy the link below to invite manually.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-foreground">SMTP not configured</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      The invitation was recorded in the outbox (Digest view). Copy the invite link
+                      to onboard {inviteResult.memberName} manually.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+            {inviteResult.claimToken && (
+              <Button type="button" variant="outline" className="w-full gap-2" onClick={copyClaimLink}>
+                <Copy className="size-4" aria-hidden /> Copy invite link
+              </Button>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                onClick={() => {
+                  setInviteResult(null);
+                  onOpenChange(false);
+                }}
+              >
+                Done
+              </Button>
+            </DialogFooter>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+        ) : (
+          <form onSubmit={submit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="invite-name">Name</Label>
-              <Input id="invite-name" placeholder="Optional" value={name} onChange={(e) => setName(e.target.value)} />
+              <Label htmlFor="invite-email">Email</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                required
+                placeholder="teammate@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="invite-name">Name</Label>
+                <Input id="invite-name" placeholder="Optional" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invite-title">Title</Label>
+                <Input id="invite-title" placeholder="e.g. Designer" value={title} onChange={(e) => setTitle(e.target.value)} />
+              </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="invite-title">Title</Label>
-              <Input id="invite-title" placeholder="e.g. Designer" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <Label>Role</Label>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger aria-label="Role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Role</Label>
-            <Select value={role} onValueChange={setRole}>
-              <SelectTrigger aria-label="Role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy} className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700">
-              {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              Add member
-            </Button>
-          </DialogFooter>
-        </form>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy} className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700">
+                {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                <SendHorizontal className="size-4" aria-hidden />
+                Add &amp; email invite
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -162,6 +264,7 @@ export function TeamView() {
   const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [changingRole, setChangingRole] = useState<string | null>(null);
+  const [resending, setResending] = useState<string | null>(null);
 
   const members = useMemo(() => workspace?.members ?? [], [workspace]);
   const isAdmin = role === "ADMIN";
@@ -177,6 +280,32 @@ export function TeamView() {
       toast.error(err instanceof Error ? err.message : "Failed to change role");
     } finally {
       setChangingRole(null);
+    }
+  }
+
+  async function resendInvite(member: MemberWithRoleDTO) {
+    setResending(member.id);
+    try {
+      const res = await api.resendInvite(member.id);
+      if (res.status === "SENT") {
+        toast.success(res.message);
+      } else if (res.status === "SIMULATED") {
+        const link = res.claimToken
+          ? `${window.location.origin}/?claim=${encodeURIComponent(res.claimToken)}`
+          : null;
+        if (link) {
+          await navigator.clipboard.writeText(link).catch(() => undefined);
+          toast.info(`${res.message} — link copied`);
+        } else {
+          toast.info(res.message);
+        }
+      } else {
+        toast.error(res.message);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resend invite");
+    } finally {
+      setResending(null);
     }
   }
 
@@ -248,7 +377,7 @@ export function TeamView() {
                             {m.role}
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-40">
+                        <DropdownMenuContent align="start" className="w-44">
                           <DropdownMenuLabel className="text-xs text-muted-foreground">Change role</DropdownMenuLabel>
                           <DropdownMenuSeparator />
                           {ROLES.map((r) => (
@@ -260,6 +389,22 @@ export function TeamView() {
                               {r}
                             </DropdownMenuItem>
                           ))}
+                          {canInvite && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={resending === m.id}
+                                onSelect={() => void resendInvite(m)}
+                              >
+                                {resending === m.id ? (
+                                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                                ) : (
+                                  <SendHorizontal className="size-4" aria-hidden />
+                                )}
+                                Resend invite email
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     ) : (

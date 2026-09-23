@@ -430,6 +430,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           title: `${current.key} assigned to you`,
           body: `${actor.name} assigned you: ${current.summary}`,
           issueId: current.id,
+          emailCtx: { actorName: actor.name },
         });
       }
     }

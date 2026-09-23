@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ACCENT_BOOTSTRAP_SCRIPT } from "@/lib/appearance";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,10 +15,46 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#1c1917" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
-  title: "ProjectOS — Project Management Portal",
+  metadataBase: new URL(process.env.APP_URL || "http://localhost:3000"),
+  title: {
+    default: "ProjectOS — In-house Jira Alternative",
+    template: "%s · ProjectOS",
+  },
   description:
-    "ProjectOS is a multi-tenant project management portal with kanban boards, sprints, backlog planning, reports and notifications.",
+    "ProjectOS is a self-hosted, multi-tenant project management portal — kanban boards, sprints, backlog planning, workflow automation, reports and email notifications. Your in-house alternative to Jira.",
+  applicationName: "ProjectOS",
+  keywords: [
+    "project management",
+    "jira alternative",
+    "kanban",
+    "scrum",
+    "sprint planning",
+    "self-hosted",
+    "issue tracker",
+  ],
+  openGraph: {
+    type: "website",
+    siteName: "ProjectOS",
+    title: "ProjectOS — In-house Jira Alternative",
+    description:
+      "Boards, backlogs, sprints, reports and email notifications — one self-hosted portal for your whole organization.",
+    images: [{ url: "/icon-512.png", width: 512, height: 512, alt: "ProjectOS logo" }],
+  },
+  appleWebApp: {
+    capable: true,
+    title: "ProjectOS",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({
@@ -27,6 +64,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: ACCENT_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

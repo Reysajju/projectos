@@ -642,6 +642,19 @@ export interface EmailLogDTO {
   createdAt: string;
 }
 
+export interface EmailDetailDTO {
+  id: string;
+  kind: string;
+  toEmail: string;
+  toName: string | null;
+  subject: string;
+  status: string;
+  error: string | null;
+  html: string | null;
+  text: string;
+  createdAt: string;
+}
+
 export interface EmailsPayload {
   emails: EmailLogDTO[];
   total: number;

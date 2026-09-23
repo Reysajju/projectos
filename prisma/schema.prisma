@@ -38,6 +38,25 @@ model User {
   apiKeysCreated ApiKey[]           @relation("ApiKeyCreator")
   preferences   UserPreference[]
   emails        EmailLog[]
+  authTokens    AuthToken[]
+}
+
+// ─── Claim / reset tokens (invitations + password recovery) ─────
+// A CLAIM token is emailed when someone is invited to an org without a
+// known password: the link (?claim=<raw>) lets them set name+password.
+// A RESET token powers the "forgot password" flow (?reset=<raw>, 1 h).
+// Only the sha256 hash of the raw token is stored — same policy as API keys.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  purpose   String    // CLAIM | RESET
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
 }
 
 model Session {
@@ -474,11 +493,13 @@ model EmailLog {
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   userId    String?
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  kind      String   // DAILY_DIGEST | WEEKLY_DIGEST
+  kind      String   // INVITE | WELCOME | RESET | TEST | ASSIGNED | STATUS_CHANGED | COMMENT | MENTIONED | DAILY_DIGEST | WEEKLY_DIGEST
   toEmail   String
   subject   String
-  body      String
-  status    String   @default("SIMULATED") // SIMULATED | SENT | FAILED
+  body      String   // plain-text rendering (always present — clients without HTML)
+  html      String?  // rich HTML rendering (null when templates unavailable)
+  status    String   @default("SIMULATED") // SENT | FAILED | SIMULATED (SMTP not configured)
+  error     String?  // delivery error message when status = FAILED
   meta      String?  // JSON — e.g. { trigger: "manual" | "cron", counts: {...} }
   createdAt DateTime @default(now())
 

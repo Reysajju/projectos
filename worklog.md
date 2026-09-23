@@ -631,3 +631,40 @@ Stage Summary:
 - Remaining blueprint gaps: real SMTP for digests (swap point exists), board/backlog quick-filters presets, roadmap arrow hover type label, issue bulk-edit, SLA/breach reporting.
 - Known minor: `cf.X ORDER BY` without any operator is (correctly) a parse error, same as real JQL; automation test-run still scans last 50 issues by updatedAt; outbox prune remains org-wide.
 - Recommended next: issue bulk-edit toolbar (multi-select on Issues table), saved-filter sharing/permissions, roadmap arrow hover floating type label, board quick-filter presets (only mine / recently updated).
+---
+Task ID: 19 (round 11)
+Agent: coordinator
+Task: Production-readiness pass — real Nodemailer SMTP for ALL emails (invites, assignments, comments, digests) with app-password in .env; independent DB confirmed; professional logo + browser icons; full theme system
+
+Work Log:
+EMAIL ENGINE (Nodemailer)
+- Installed nodemailer@7 + @types/nodemailer. New src/lib/mailer.ts: lazy SMTP transport from env (SMTP_HOST/PORT/USER/PASS/SECURE, MAIL_FROM, APP_URL), fast timeouts, verifySmtp(), deliverEmail() (EmailLog row with SENT/FAILED/SIMULATED + error), queueEmail() fire-and-forget, per-user preference gate, createAuthToken/consumeAuthToken (sha256-hashed CLAIM/RESET tokens), sendDigestEmail().
+- New src/lib/email-templates.ts: table-based responsive HTML emails (renders with images blocked) + plain-text alternates — invite (claim link), welcome, reset, assigned, status-changed, comment/mention, digest (section tables + status dots), test. Brand header = pure HTML/CSS (amber P tile + wordmark), footer with per-view note.
+- notify() in workflow.ts now also fires the matching email (assigned/status_changed/comment/mentioned) with actor/from/to context; call sites in issues routes + comments + mentions thread actorName. notifyMentions included.
+- INVITE FLOW: POST /api/members now creates a 7-day CLAIM token for brand-new users and emails the invitation (returns emailStatus + claimToken for copy-link fallback when SMTP off). New POST /api/members/resend-invite (ADMIN/MANAGER).
+- ACCOUNT CLAIM: GET/POST /api/auth/claim — validate token, set name+password, session created. AuthView gained claim mode (?claim=) with invalid-link state.
+- PASSWORD RESET: POST /api/auth/forgot-password (no enumeration) + POST /api/auth/reset-password (1h single-use token, kills all sessions). AuthView gained forgot + reset modes (?reset=) and "Forgot password?" link on login.
+- WELCOME email on signup (queueEmail). Digest routes (manual + /api/digest/cron) switched to sendDigestEmail → rich HTML.
+- EmailLog schema: +html, +error columns; kinds now INVITE/WELCOME/RESET/TEST/ASSIGNED/STATUS_CHANGED/COMMENT/MENTIONED/DIGESTs. New GET /api/emails/[emailId] returns full rendered email.
+- Settings: new "Email notifications" card (4 per-user toggles via /api/preferences, default ON) and "Email delivery (SMTP)" card (connection status, config explainer, Send test email button → GET/POST /api/email/test with SMTP verify).
+- DigestView outbox rows gained an eye button → dialog preview of the EXACT HTML (sandboxed iframe) or plain-text fallback.
+- .env + .env.example: SMTP_* placeholders with Gmail app-password instructions, APP_URL, COOKIE_SECURE, DIGEST_CRON_SECRET. README.md: full production guide (setup, SMTP setup per provider, invitations, branding, architecture, production checklist). sessionCookieOptions gained opt-in Secure via COOKIE_SECURE.
+
+BRANDING
+- New logo: custom SVG mark (stone-gradient rounded tile, three ascending amber-gradient bars, emerald done-dot) + wordmark lockup. public/logo-mark.svg, public/logo.svg (wordmark), src/components/portal/BrandMark.tsx (inline BrandMark + BrandLockup). Replaced all "P" tiles in AuthView, Sidebar, Splash.
+- Browser icons: src/app/icon.svg + icon.png(32) + apple-icon.png(180) + public/icon-192/512.png generated via sharp (scripts/gen-icons.mjs). src/app/manifest.ts (PWA manifest). layout.tsx: full metadata (title template, description, OG, appleWebApp, themeColor light/dark viewport, metadataBase from APP_URL).
+
+THEMES
+- Accent system: data-accent on <html> retints --primary/--ring/--chart-1/--sidebar-* for amber (default), emerald, violet, rose (light+dark). src/lib/appearance.ts (ACCENTS, setAccent pub/sub, ACCENT_BOOTSTRAP_SCRIPT inline in layout head = no flash).
+- theme-provider: defaultTheme=system + enableSystem (System option now real). QuickThemeToggle (Sun/Moon) added to TopBar; sidebar ThemeMenuItems already had Light/Dark/System. SettingsView gained Appearance card (theme segmented control + accent swatches with check ring).
+
+QA / VERIFICATION (agent-browser + curl)
+- tsc + eslint clean (fixed 3 react-hooks/set-state-in-effect via useSyncExternalStore mounted/accent patterns; DigestView preview derives loading from email?.id).
+- API E2E: login→/api/email/test GET+POST (SIMULATED+message)→invite (emailStatus SIMULATED + claimToken)→claim GET validate + POST complete (session cookie)→forgot-password (RESET email logged)→issue create with assignee → ASSIGNED email auto-logged with 4.5KB HTML → digest send → 14KB HTML digest.
+- Browser: login page (new lockup + Forgot password?) → dashboard (brand mark, theme toggle) → Settings (Appearance + Email notifications + SMTP cards, accent emerald switch verified via computed --primary, test-email toast) → Digest outbox (preview dialog renders branded HTML email) → Team invite dialog (status panel + Copy invite link) → claim link in fresh session → "Join your team" → activated → dashboard as MEMBER. Dark mode round-trip OK. Mobile 390px: scrollWidth=390 (no overflow). All icon/manifest endpoints 200. dev.log clean. WEB-20 test ticket deleted afterwards.
+
+Stage Summary:
+- Round 11 shipped: production Nodemailer email engine wired to every workspace event (invites w/ claim links, assignments, status changes, comments/mentions, welcome, reset, digests, test) with per-user mutes + auditable outbox + HTML preview; independent SQLite DB confirmed (no Supabase anywhere); new logo/favicon/PWA icon set; Light/Dark/System + 4 accent palettes; README + .env.example production docs.
+- Production deploy now only needs: fill SMTP_HOST/SMTP_USER/SMTP_PASS in .env (Gmail app password), set APP_URL (+COOKIE_SECURE behind TLS), restart, hit "Send test email".
+- Remaining gaps: email bounce/webhook handling (provider-side), attachments in emails, per-project notification rules, notification digest frequency per-user.
+- Recommended next: board quick-filter presets, roadmap arrow hover type label, email bounce marking via SMTP responses, i18n of email templates.

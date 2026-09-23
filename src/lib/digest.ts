@@ -8,6 +8,7 @@
  */
 
 import { db } from "@/lib/db";
+import { deliverEmail } from "@/lib/mailer";
 
 export type DigestKind = "DAILY" | "WEEKLY";
 
@@ -226,7 +227,10 @@ export function renderDigestText(input: {
   return lines.join("\n");
 }
 
-/** Record a (simulated) delivery in the outbox. */
+/**
+ * Deliver a digest through the real mail engine (SMTP when configured,
+ * SIMULATED outbox row otherwise) and return the delivery result.
+ */
 export async function sendEmail(opts: {
   orgId: string;
   userId: string | null;
@@ -234,8 +238,23 @@ export async function sendEmail(opts: {
   kind: string;
   subject: string;
   body: string;
+  html?: string | null;
   meta?: Record<string, unknown>;
-}): Promise<string> {
+}): Promise<{ logId: string; status: string }> {
+  if (opts.html) {
+    const result = await deliverEmail({
+      orgId: opts.orgId,
+      userId: opts.userId,
+      toEmail: opts.toEmail,
+      kind: opts.kind,
+      subject: opts.subject,
+      html: opts.html,
+      text: opts.body,
+      meta: opts.meta,
+    });
+    return { logId: result.logId, status: result.status };
+  }
+  // Fallback for callers that only pass plain text (keeps old API alive).
   const row = await db.emailLog.create({
     data: {
       orgId: opts.orgId,
@@ -248,5 +267,5 @@ export async function sendEmail(opts: {
       meta: opts.meta ? JSON.stringify(opts.meta) : null,
     },
   });
-  return row.id;
+  return { logId: row.id, status: "SIMULATED" };
 }

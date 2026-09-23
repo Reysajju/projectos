@@ -139,6 +139,7 @@ export async function POST(req: NextRequest) {
         title: `${created.key} assigned to you`,
         body: `${session.user.name} assigned you: ${summary}`,
         issueId: created.id,
+        emailCtx: { actorName: session.user.name },
       });
     }
 

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import type { User } from "@prisma/client";
+import { sendNotificationEmail } from "@/lib/mailer";
 
 // ─── Workflow engine: the ONLY sanctioned way to change issue status ──
 
@@ -35,6 +36,11 @@ export async function logActivity(opts: {
   });
 }
 
+/**
+ * Create an in-app notification AND (fire-and-forget) the matching email.
+ * Email delivery respects per-user preferences (Settings → Email notifications)
+ * and degrades to the auditable outbox when SMTP is not configured.
+ */
 export async function notify(opts: {
   orgId: string;
   userId: string;
@@ -42,6 +48,7 @@ export async function notify(opts: {
   title: string;
   body?: string | null;
   issueId?: string | null;
+  emailCtx?: Record<string, string | null | undefined>;
 }) {
   if (!opts.userId) return;
   await db.notification.create({
@@ -53,6 +60,15 @@ export async function notify(opts: {
       body: opts.body ?? null,
       issueId: opts.issueId ?? null,
     },
+  });
+  void sendNotificationEmail({
+    orgId: opts.orgId,
+    userId: opts.userId,
+    type: opts.type,
+    title: opts.title,
+    body: opts.body,
+    issueId: opts.issueId,
+    emailCtx: opts.emailCtx,
   });
 }
 
@@ -137,6 +153,11 @@ export async function transitionIssue(params: {
       title: `${issue.key} moved to ${newStatus.name}`,
       body: `${params.actor.name} changed status: ${issue.status.name} → ${newStatus.name}`,
       issueId: issue.id,
+      emailCtx: {
+        actorName: params.actor.name,
+        from: issue.status.name,
+        to: newStatus.name,
+      },
     });
   }
 
@@ -180,6 +201,7 @@ export async function notifyMentions(params: {
         title: `You were mentioned in ${params.issueKey}`,
         body: `${params.actor.name}: ${params.body.slice(0, 120)}`,
         issueId: params.issueId,
+        emailCtx: { actorName: params.actor.name },
       });
     }
   }

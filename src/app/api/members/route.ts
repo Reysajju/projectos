@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { getSession, hashPassword } from "@/lib/auth";
 import { logActivity } from "@/lib/workflow";
 import { toMemberDTO } from "@/lib/dto";
+import { createAuthToken, deliverEmail } from "@/lib/mailer";
+import { inviteEmail } from "@/lib/email-templates";
 import {
   ApiError,
   ROLES,
@@ -23,7 +25,12 @@ export const dynamic = "force-dynamic";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AVATAR_COLORS = ["#d97706", "#059669", "#7c3aed", "#e11d48", "#0d9488", "#ea580c", "#65a30d"];
 
-/** Invite a member: find-or-create user by email, attach to org. ADMIN/MANAGER only. */
+/**
+ * Invite a member: find-or-create user by email, attach to org, and email the
+ * invitation. New users get a CLAIM link (?claim=<token>) to set their own
+ * password; existing users get a "you've been added" email.
+ * ADMIN/MANAGER only.
+ */
 export async function POST(req: NextRequest) {
   return handle(async () => {
     const session = await getSession(req);
@@ -39,12 +46,15 @@ export async function POST(req: NextRequest) {
     const name = optStr(body, "name")?.trim() || email.split("@")[0];
     const title = optStrOrNull(body, "title") ?? null;
     const role = optStr(body, "role") ?? "MEMBER";
+    const sendEmailFlag = body.sendEmail !== false; // default true
     if (!(ROLES as readonly string[]).includes(role)) {
       throw new ApiError("Invalid role", 400);
     }
 
-    // Find-or-create the user (invited users get a random, undisclosable password).
+    // Find-or-create the user (invited users get a random, undisclosable password
+    // until they claim their account via the emailed link).
     let user = await db.user.findUnique({ where: { email } });
+    let isNewUser = false;
     if (!user) {
       user = await db.user.create({
         data: {
@@ -55,6 +65,7 @@ export async function POST(req: NextRequest) {
           avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
         },
       });
+      isNewUser = true;
     } else if (title) {
       user = await db.user.update({ where: { id: user.id }, data: { title } });
     }
@@ -79,6 +90,36 @@ export async function POST(req: NextRequest) {
       newValue: `${member.user.name} (${role})`,
     });
 
-    return NextResponse.json(toMemberDTO(member));
+    // ── Invitation email (claim link for brand-new users) ──
+    let emailStatus: string | null = null;
+    let claimToken: string | null = null;
+    if (sendEmailFlag) {
+      claimToken = isNewUser ? await createAuthToken(user.id, "CLAIM", 24 * 7) : null;
+      const tpl = inviteEmail({
+        appUrl: process.env.APP_URL || "http://localhost:3000",
+        orgName: session.org.name,
+        inviterName: session.user.name,
+        role,
+        recipientName: user.name,
+        claimUrl: claimToken
+          ? `${process.env.APP_URL || "http://localhost:3000"}/?claim=${encodeURIComponent(claimToken)}`
+          : null,
+        isNewUser,
+      });
+      const result = await deliverEmail({
+        orgId,
+        userId: user.id,
+        toEmail: user.email,
+        kind: "INVITE",
+        subject: tpl.subject,
+        html: tpl.html,
+        text: tpl.text,
+        transactional: true,
+        meta: { inviter: session.user.email, role, isNewUser },
+      });
+      emailStatus = result.status;
+    }
+
+    return NextResponse.json({ ...toMemberDTO(member), emailStatus, claimToken });
   });
 }

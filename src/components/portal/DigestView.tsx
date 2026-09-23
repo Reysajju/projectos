@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   CalendarClock,
   Clock,
+  Eye,
   Inbox,
   Loader2,
   Mail,
@@ -28,9 +29,10 @@ import { toast } from "sonner";
 
 import { apiDigest } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
-import type { DigestKindDTO, DigestPreviewPayload, EmailsPayload } from "@/lib/portal-types";
+import type { DigestKindDTO, DigestPreviewPayload, EmailDetailDTO, EmailsPayload } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RelativeTime } from "./RelativeTime";
 import { EmptyState } from "./EmptyState";
 
@@ -44,6 +46,7 @@ export function DigestView() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState<"me" | "all" | null>(null);
   const [pruning, setPruning] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -271,6 +274,14 @@ export function DigestView() {
                     >
                       {e.status}
                     </span>
+                    <button
+                      type="button"
+                      aria-label={`Preview ${e.subject}`}
+                      className="shrink-0 rounded p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                      onClick={() => setPreviewId(e.id)}
+                    >
+                      <Eye className="size-3.5" aria-hidden />
+                    </button>
                     <span className="w-20 shrink-0 text-right text-[11px] text-muted-foreground">
                       <RelativeTime date={e.createdAt} />
                     </span>
@@ -289,6 +300,64 @@ export function DigestView() {
           )}
         </div>
       )}
+
+      <OutboxEmailPreview id={previewId} onClose={() => setPreviewId(null)} />
     </div>
+  );
+}
+
+// ─── Outbox email preview (renders the exact HTML a client would receive) ──
+
+function OutboxEmailPreview({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const [email, setEmail] = useState<EmailDetailDTO | null>(null);
+
+  useEffect(() => {
+    if (!id) return; // dialog closed — nothing to fetch
+    let alive = true;
+    apiDigest
+      .getEmail(id)
+      .then((d) => alive && setEmail(d))
+      .catch(() => alive && toast.error("Could not load the email"));
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const loading = id !== null && email?.id !== id;
+
+  return (
+    <Dialog open={id !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="pr-6 text-sm leading-snug">
+            {email ? email.subject : loading ? "Loading…" : "Email preview"}
+          </DialogTitle>
+          {email && (
+            <div className="text-xs text-muted-foreground">
+              to {email.toName ?? email.toEmail} · {email.status.toLowerCase()} ·{" "}
+              <RelativeTime date={email.createdAt} />
+            </div>
+          )}
+        </DialogHeader>
+        <div className="min-h-40 flex-1 overflow-hidden rounded-lg border border-border bg-white">
+          {loading ? (
+            <div className="flex h-64 items-center justify-center">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
+            </div>
+          ) : email?.html ? (
+            <iframe
+              title="Email preview"
+              srcDoc={email.html}
+              sandbox=""
+              className="h-[60vh] w-full"
+            />
+          ) : email ? (
+            <pre className="h-[60vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs text-foreground">
+              {email.text}
+            </pre>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

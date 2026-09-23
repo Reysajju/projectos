@@ -49,6 +49,7 @@ import type {
   ReceiverPingsPayload,
   DigestKindDTO,
   DigestPreviewPayload,
+  EmailDetailDTO,
   EmailsPayload,
 } from "./portal-types";
 
@@ -103,6 +104,20 @@ export const api = {
     apiFetch<AuthPayload>("/api/auth/login", jsonBody(body, "POST")),
 
   logout: () => apiFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  claimInfo: (token: string) =>
+    apiFetch<{ valid: boolean; name?: string; email?: string; expiresAt?: string }>(
+      `/api/auth/claim?token=${encodeURIComponent(token)}`
+    ),
+
+  claimAccount: (body: { token: string; name?: string; password: string }) =>
+    apiFetch<AuthPayload>("/api/auth/claim", jsonBody(body, "POST")),
+
+  forgotPassword: (body: { email: string }) =>
+    apiFetch<{ ok: boolean }>("/api/auth/forgot-password", jsonBody(body, "POST")),
+
+  resetPassword: (body: { token: string; password: string }) =>
+    apiFetch<AuthPayload>("/api/auth/reset-password", jsonBody(body, "POST")),
 
   me: () => apiFetch<MePayload>("/api/auth/me"),
 
@@ -224,10 +239,37 @@ export const api = {
   // ─── Team ─────────────────────────────────────────────────────
 
   inviteMember: (body: { email: string; name?: string; role?: string; title?: string }) =>
-    apiFetch<MemberWithRoleDTO>("/api/members", jsonBody(body, "POST")),
+    apiFetch<MemberWithRoleDTO & { emailStatus?: string | null; claimToken?: string | null }>(
+      "/api/members",
+      jsonBody(body, "POST")
+    ),
 
   patchMember: (userId: string, body: { role: string }) =>
     apiFetch<MemberWithRoleDTO>(`/api/members/${userId}`, jsonBody(body, "PATCH")),
+
+  resendInvite: (userId: string) =>
+    apiFetch<{ ok: boolean; status: string; claimToken?: string; message: string }>(
+      "/api/members/resend-invite",
+      jsonBody({ userId }, "POST")
+    ),
+
+  emailStatus: () =>
+    apiFetch<{
+      configured: boolean;
+      host: string | null;
+      port: number | null;
+      secure: boolean;
+      user: string | null;
+      from: string;
+      appUrl: string;
+      suggestion: string | null;
+    }>("/api/email/test"),
+
+  sendTestEmail: () =>
+    apiFetch<{ status: string; message: string; verificationError?: string }>(
+      "/api/email/test",
+      { method: "POST" }
+    ),
 
   // ─── Custom fields ────────────────────────────────────────
 
@@ -369,6 +411,9 @@ export const apiDigest = {
     apiFetch<{ sent: number; kind: string }>("/api/digest", jsonBody(body, "POST")),
 
   log: () => apiFetch<EmailsPayload>("/api/emails"),
+
+  getEmail: (id: string) =>
+    apiFetch<EmailDetailDTO>(`/api/emails/${id}`),
 
   /** Prune outbox rows older than the retention window (ADMIN/MANAGER). */
   prune: () => apiFetch<{ deleted: number; retentionDays: number }>("/api/emails", { method: "DELETE" }),

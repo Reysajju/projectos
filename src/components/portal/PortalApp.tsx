@@ -23,6 +23,7 @@ import { WebhooksView } from "./WebhooksView";
 import { ApiKeysView } from "./ApiKeysView";
 import { DigestView } from "./DigestView";
 import { WorkflowDesignerView } from "./WorkflowDesignerView";
+import { BrandMark } from "./BrandMark";
 import { Toaster } from "@/components/ui/sonner";
 
 type AuthState = "loading" | "anon" | "authed";
@@ -30,8 +31,8 @@ type AuthState = "loading" | "anon" | "authed";
 function Splash() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
-      <div className="flex size-12 animate-pulse items-center justify-center rounded-xl bg-amber-600 text-xl font-bold text-white shadow-lg shadow-amber-600/25">
-        P
+      <div className="animate-pulse">
+        <BrandMark size={48} className="drop-shadow-lg shadow-amber-600/25 rounded-[14px]" />
       </div>
       <div className="flex items-center gap-2 text-sm text-muted-foreground/80">
         <span className="inline-block size-1.5 animate-bounce rounded-full bg-amber-500/100 [animation-delay:0ms]" />

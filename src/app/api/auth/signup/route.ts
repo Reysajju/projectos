@@ -10,6 +10,8 @@ import {
 } from "@/lib/auth";
 import { toOrgDTO, toUserDTO } from "@/lib/dto";
 import { ApiError, handle, jsonError, optStr, parseBody, reqStr } from "@/lib/api-helpers";
+import { queueEmail } from "@/lib/mailer";
+import { welcomeEmail } from "@/lib/email-templates";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +63,25 @@ export async function POST(req: NextRequest) {
     await seedOrgDefaults(org.id);
 
     const token = await createSession(user.id);
+
+    // Welcome email (fire-and-forget; SIMULATED outbox row when SMTP is off).
+    const tpl = welcomeEmail({
+      appUrl: (process.env.APP_URL || "http://localhost:3000").replace(/\/+$/, ""),
+      name: user.name,
+      orgName: org.name,
+    });
+    queueEmail({
+      orgId: org.id,
+      userId: user.id,
+      toEmail: user.email,
+      kind: "WELCOME",
+      subject: tpl.subject,
+      html: tpl.html,
+      text: tpl.text,
+      transactional: true,
+      meta: { trigger: "signup" },
+    });
+
     const res = NextResponse.json({ user: toUserDTO(user), org: toOrgDTO(org) });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return res;

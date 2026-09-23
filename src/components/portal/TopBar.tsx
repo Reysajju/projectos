@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
   AlarmClock,
   ArrowLeftRight,
@@ -11,14 +11,17 @@ import {
   CircleDot,
   FolderPlus,
   MessageSquare,
+  Moon,
   Plus,
   Search,
+  Sun,
   UserPlus,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 
 import { usePortalStore } from "@/lib/portal-store";
+import { useTheme } from "next-themes";
 import type { NotificationDTO } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./Avatar";
@@ -58,6 +61,33 @@ const NOTIF_ICONS: Record<string, LucideIcon> = {
 
 function notificationIcon(type: string): LucideIcon {
   return NOTIF_ICONS[type] ?? CircleDot;
+}
+
+const emptySubscribe = () => () => undefined;
+
+/** One-click light/dark toggle (System lives in the sidebar + Settings). */
+function QuickThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
+
+  if (!mounted) return <span className="size-9" aria-hidden />;
+
+  const isDark = resolvedTheme === "dark";
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className="text-muted-foreground hover:text-foreground"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+    >
+      {isDark ? <Sun className="size-4.5" aria-hidden /> : <Moon className="size-4.5" aria-hidden />}
+    </Button>
+  );
 }
 
 function NotificationsBell() {
@@ -229,6 +259,8 @@ export function TopBar() {
         </button>
 
         <NotificationsBell />
+
+        <QuickThemeToggle />
 
         {/* Create */}
         <DropdownMenu>

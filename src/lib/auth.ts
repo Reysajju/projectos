@@ -56,7 +56,9 @@ export function sessionCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: false,
+    // Opt-in Secure for HTTPS deployments: set COOKIE_SECURE=true behind TLS
+    // (kept off by default so plain-HTTP intranet installs keep working).
+    secure: process.env.COOKIE_SECURE === "true",
     path: "/",
     maxAge: SESSION_DAYS * 24 * 60 * 60,
   };

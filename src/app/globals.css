@@ -130,3 +130,57 @@
 html.theme-transitioning * {
   transition: background-color 200ms ease, border-color 200ms ease, color 120ms ease !important;
 }
+
+/* ─── Accent themes (Settings → Appearance) ─────────────────────
+   data-accent on <html> retints the primary action color, focus rings,
+   charts and sidebar highlights. Default (no attribute) = amber. */
+
+[data-accent="emerald"] {
+  --primary: oklch(0.596 0.122 163);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.696 0.17 162 / 50%);
+  --chart-1: oklch(0.696 0.17 162);
+  --sidebar-primary: oklch(0.696 0.17 162);
+  --sidebar-ring: oklch(0.696 0.17 162 / 45%);
+}
+.dark[data-accent="emerald"] {
+  --primary: oklch(0.696 0.17 162);
+  --primary-foreground: oklch(0.19 0.02 160);
+  --ring: oklch(0.696 0.17 162 / 55%);
+}
+
+[data-accent="violet"] {
+  --primary: oklch(0.541 0.247 293);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.606 0.25 292.7 / 50%);
+  --chart-1: oklch(0.606 0.25 292.7);
+  --sidebar-primary: oklch(0.606 0.25 292.7);
+  --sidebar-ring: oklch(0.606 0.25 292.7 / 45%);
+}
+.dark[data-accent="violet"] {
+  --primary: oklch(0.606 0.25 292.7);
+  --primary-foreground: oklch(0.98 0.005 300);
+  --ring: oklch(0.606 0.25 292.7 / 55%);
+}
+
+[data-accent="rose"] {
+  --primary: oklch(0.586 0.253 17.6);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.645 0.246 16.4 / 50%);
+  --chart-1: oklch(0.645 0.246 16.4);
+  --sidebar-primary: oklch(0.645 0.246 16.4);
+  --sidebar-ring: oklch(0.645 0.246 16.4 / 45%);
+}
+.dark[data-accent="rose"] {
+  --primary: oklch(0.645 0.246 16.4);
+  --primary-foreground: oklch(0.98 0.005 15);
+  --ring: oklch(0.645 0.246 16.4 / 55%);
+}
+
+/* Amber accent = legacy default; explicit for completeness. */
+[data-accent="amber"] {
+  --ring: oklch(0.769 0.152 70.08 / 50%);
+}
+.dark[data-accent="amber"] {
+  --ring: oklch(0.769 0.152 70.08 / 55%);
+}

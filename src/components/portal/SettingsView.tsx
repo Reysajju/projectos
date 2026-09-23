@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Building2, Check, Copy, FolderKanban, ListPlus, Loader2, Pencil, Plus, Settings2, Trash2, TriangleAlert, Users } from "lucide-react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Building2, Check, Copy, FolderKanban, ListPlus, Loader2, MailCheck, MailWarning, Monitor, Moon, Palette, Pencil, Plus, SendHorizontal, Settings2, Sun, Trash2, TriangleAlert, Users } from "lucide-react";
+import { useTheme } from "next-themes";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
+import { ACCENTS, setAccent, getStoredAccent, subscribeAccent } from "@/lib/appearance";
 import type { CustomFieldDTO, CustomFieldType } from "@/lib/portal-types";
+import { cn } from "@/lib/utils";
 import { Avatar } from "./Avatar";
 import { ProjectDialog } from "./ProjectDialog";
 import { Button } from "@/components/ui/button";
@@ -169,6 +172,13 @@ export function SettingsView() {
         </CardContent>
       </Card>
 
+      {/* Appearance (theme + accent) */}
+      <AppearanceCard />
+
+      {/* Email notifications + SMTP delivery */}
+      <EmailNotificationsCard />
+      <EmailDeliveryCard />
+
       {/* Custom fields */}
       <CustomFieldsManager canManage={role === "ADMIN" || role === "MANAGER"} fields={workspace.customFields} />
 
@@ -306,6 +316,278 @@ export function SettingsView() {
         />
       )}
     </div>
+  );
+}
+
+// ─── Appearance (theme mode + accent color) ─────────────────────
+
+const emptySubscribe = () => () => undefined;
+
+function AppearanceCard() {
+  const { theme, setTheme } = useTheme();
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
+  const accent = useSyncExternalStore(subscribeAccent, getStoredAccent, () => "amber");
+
+  const modes = [
+    { id: "light", label: "Light", icon: Sun },
+    { id: "dark", label: "Dark", icon: Moon },
+    { id: "system", label: "System", icon: Monitor },
+  ] as const;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Palette className="size-4 text-amber-600" aria-hidden /> Appearance
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="space-y-2">
+          <Label className="text-sm font-medium text-foreground">Theme</Label>
+          <div
+            role="radiogroup"
+            aria-label="Color theme"
+            className="grid max-w-sm grid-cols-3 gap-1.5 rounded-lg border border-border bg-muted/40 p-1"
+          >
+            {modes.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={mounted && theme === m.id}
+                onClick={() => setTheme(m.id)}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+                  mounted && theme === m.id
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <m.icon className="size-3.5" aria-hidden /> {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-sm font-medium text-foreground">Accent color</Label>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                aria-label={`${a.label} accent${accent === a.id ? " (current)" : ""}`}
+                aria-pressed={accent === a.id}
+                onClick={() => setAccent(a.id)}
+                className={cn(
+                  "group relative flex size-9 items-center justify-center rounded-full ring-2 ring-offset-2 ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-amber-500/70",
+                  accent === a.id ? "ring-foreground" : "ring-transparent hover:ring-border"
+                )}
+                style={{ backgroundColor: a.swatch }}
+              >
+                {accent === a.id && <Check className="size-4 text-white drop-shadow" aria-hidden />}
+              </button>
+            ))}
+            <span className="ml-1 text-xs text-muted-foreground">
+              Tints buttons, focus rings and charts. Saved to this browser.
+            </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Email notifications (per-user preferences) ─────────────────
+
+const EMAIL_PREFS = [
+  { key: "email.assigned", label: "Issues assigned to me", hint: "Someone hands you an issue." },
+  { key: "email.status_changed", label: "Status changes on issues I follow", hint: "Reporter + assignee are emailed when a state changes." },
+  { key: "email.comment", label: "Comments & mentions", hint: "New comments on issues you follow, and @mentions." },
+  { key: "email.digest", label: "Daily & weekly digests", hint: "Scheduled summary of your workload." },
+] as const;
+
+function EmailNotificationsCard() {
+  const [prefs, setPrefs] = useState<Record<string, boolean>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .getPreferences()
+      .then((all) => {
+        if (!alive) return;
+        const next: Record<string, boolean> = {};
+        for (const p of EMAIL_PREFS) next[p.key] = all[p.key] !== false;
+        setPrefs(next);
+        setLoaded(true);
+      })
+      .catch(() => alive && setLoaded(true));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function togglePref(key: string, value: boolean) {
+    setPrefs((prev) => ({ ...prev, [key]: value }));
+    try {
+      await api.setPreference(key, value);
+      toast.success(value ? "Emails enabled" : "Emails muted for this event");
+    } catch {
+      setPrefs((prev) => ({ ...prev, [key]: !value }));
+      toast.error("Could not save preference");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <MailCheck className="size-4 text-amber-600" aria-hidden /> Email notifications
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="pb-1 text-xs text-muted-foreground">
+          Every workspace event that matters lands in your inbox. All events are on by default —
+          mute the ones you don&apos;t want.
+        </p>
+        {!loaded
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-12 animate-pulse rounded-lg bg-muted/50" />
+            ))
+          : EMAIL_PREFS.map((p) => (
+              <div
+                key={p.key}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/40"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">{p.label}</div>
+                  <p className="text-xs text-muted-foreground">{p.hint}</p>
+                </div>
+                <Switch
+                  checked={prefs[p.key] ?? true}
+                  onCheckedChange={(v) => void togglePref(p.key, v)}
+                  aria-label={`Toggle ${p.label}`}
+                />
+              </div>
+            ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Email delivery (SMTP status + test) ────────────────────────
+
+interface SmtpStatusDTO {
+  configured: boolean;
+  host: string | null;
+  port: number | null;
+  secure: boolean;
+  user: string | null;
+  from: string;
+  appUrl: string;
+  suggestion: string | null;
+}
+
+function EmailDeliveryCard() {
+  const [status, setStatus] = useState<SmtpStatusDTO | null>(null);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .emailStatus()
+      .then((s) => alive && setStatus(s))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function sendTest() {
+    setSending(true);
+    try {
+      const res = await api.sendTestEmail();
+      if (res.status === "SENT") toast.success(res.message);
+      else if (res.status === "SIMULATED") toast.info(res.message);
+      else toast.error(res.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Test failed");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <SendHorizontal className="size-4 text-amber-600" aria-hidden /> Email delivery (SMTP)
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!status ? (
+          <div className="h-20 animate-pulse rounded-lg bg-muted/50" />
+        ) : (
+          <>
+            <div
+              className={cn(
+                "flex items-start gap-3 rounded-lg border p-3",
+                status.configured ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"
+              )}
+            >
+              {status.configured ? (
+                <MailCheck className="mt-0.5 size-5 shrink-0 text-emerald-600" aria-hidden />
+              ) : (
+                <MailWarning className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden />
+              )}
+              <div className="min-w-0 text-sm">
+                {status.configured ? (
+                  <>
+                    <p className="font-medium text-foreground">SMTP connected — real emails are sent</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {status.host}:{status.port ?? 587} · TLS {status.secure ? "implicit" : "starttls"} ·
+                      from <span className="font-mono">{status.from}</span>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-foreground">Simulation mode — emails are logged, not sent</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Configure SMTP to deliver invites, assignments, comments and digests for real.
+                      Set <span className="font-mono">SMTP_HOST</span>,{" "}
+                      <span className="font-mono">SMTP_PORT</span>,{" "}
+                      <span className="font-mono">SMTP_USER</span> and{" "}
+                      <span className="font-mono">SMTP_PASS</span> (an app password works great) in
+                      your <span className="font-mono">.env</span>, then restart. Every message is
+                      rendered and stored in the Digest outbox meanwhile.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Send a test message to your own address to verify the transport.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={sending}
+                onClick={() => void sendTest()}
+              >
+                {sending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <SendHorizontal className="size-3.5" aria-hidden />}
+                Send test email
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -9,6 +9,7 @@ import { api, api2 } from "@/lib/api-client";
 import { usePortalStore, type PortalView } from "@/lib/portal-store";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./Avatar";
+import { BrandMark } from "./BrandMark";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -116,9 +117,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex h-full min-h-0 flex-col bg-gradient-to-b from-stone-950 to-stone-900 text-stone-300">
       {/* Org header */}
       <div className="flex items-center gap-2.5 border-b border-stone-800/80 px-4 py-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-600 text-sm font-bold text-white">
-          P
-        </div>
+        <BrandMark size={36} className="shrink-0" />
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-stone-100">{org?.name ?? "Workspace"}</div>
           {org && (

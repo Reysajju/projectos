@@ -53,6 +53,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         title: `New comment on ${issue.key}`,
         body: `${session.user.name}: ${clip(text, 120)}`,
         issueId: issue.id,
+        emailCtx: { actorName: session.user.name },
       });
     }
 

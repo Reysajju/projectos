@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { buildDigest, sendEmail } from "@/lib/digest";
+import { buildDigest } from "@/lib/digest";
+import { sendDigestEmail } from "@/lib/mailer";
 import { handle } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
@@ -32,13 +33,15 @@ export async function POST(req: NextRequest) {
       const orgMembers = members.filter((m) => m.orgId === org.id);
       for (const m of orgMembers) {
         const digest = await buildDigest(org.id, m.userId, "DAILY");
-        await sendEmail({
+        await sendDigestEmail({
           orgId: org.id,
           userId: m.userId,
           toEmail: m.user.email,
-          kind: "DAILY_DIGEST",
-          subject: digest.subject,
-          body: digest.text,
+          recipientName: digest.recipientName,
+          periodLabel: digest.periodLabel,
+          kind: "DAILY",
+          sections: digest.sections,
+          counts: digest.counts,
           meta: { trigger: "cron", sentTo: m.user.email, weeklyAlso: isMonday },
         });
         emails += 1;
