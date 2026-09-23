@@ -442,3 +442,31 @@ Stage Summary:
 - Remaining blueprint gaps: email digests/transactional email (§34), mentions-in-editor rich input, board column manager (merge WIP + status ordering), custom field inline editing on tables.
 - Known minor: pre-existing seed.ts userId2 tsc quirk (out of app scope); dev-tools overlay can intercept clicks in preview (dev-only).
 - Recommended next: email digest preview page + cron, board column manager, mentions-in-editor.
+---
+Task ID: 14 (round 6)
+Agent: coordinator
+Task: QA assessment (agent-browser) + bug fixes + @mentions autocomplete + board column manager + styling polish
+
+Work Log:
+- Baseline QA (all green): lint clean, GET / 200, login OK, API smoke (workspace/filters/keys/webhooks/workflow/dashboard/search/reports 200; burndown correctly 400s without sprintId), browser sweep of Dashboard/Board/Roadmap/Issues/Reports/Automation/Workflow/Search palette/Issue panel — 0 console errors, 0 page errors.
+- QA false alarm resolved: issue-panel Sheet scrollHeight anomaly (1134>800) was caused by my own programmatic scrollBy on an overflow-hidden container; pristine state measures 800=800 and wheel/keyboard scrolling works via the inner scroller. No fix needed.
+- Fix 1 — Workflow transition list showed CATEGORY labels ("To do → To do" for Backlog→To Do). Now shows "within <category>" when from/to share a category, and "A → B" categories only when they differ.
+- Fix 2 — Activity feed showed raw "changed BLOCKS" for link events. Now: issue.linked → "linked · blocks WEB-14"; issue.link_removed → "removed link · WEB-14"; Link2 icon added for both.
+- Feature 1 — @mentions autocomplete in comment editor (MentionTextarea): typing "@" (after whitespace/start) opens a member picker above the caret (avatar, name, title); live filter by name/title; ↑↓ navigate, Enter/Tab select, Esc dismiss, hover select; inserts "@Full Name " with caret restored; blur-safe via delayed close. Full stack verified end-to-end: posting "hey @Tom Okafor" produced a 'mentioned' notification for tom@acme.dev.
+- Feature 2 — Board column manager ("Columns" button on board FilterBar, visible to all roles): per-status visibility Switch + up/down reorder in a popover; guarded against hiding the last visible column; persisted per-user via GET/PATCH /api/preferences under key "board.columns" {order, hidden}; self-heals when new statuses are added; Reset restores defaults. Board renders visible statuses only, hidden columns' issues are simply not shown (personal view); DnD/workflow guards unaffected.
+- Feature 3 — Cmd/Ctrl+Enter submits the comment from the mention-aware textarea (works whether or not the mention popup is open).
+- Styling details: Columns button matches WIP-limits button style; mention popup styled as dark-mode-aware card with amber active row + keyboard hint footer; strikethrough+dim for hidden columns in manager; "x/y visible" counter.
+
+Verification (curl + agent-browser):
+- Columns: hide "To Do" → GET /api/preferences shows {hidden:[…]} → hard reload keeps column hidden; move "Done" up ×2 → order persisted; Reset → defaults restored. Dark mode + 390px mobile clean (0 horizontal overflow).
+- Mentions: "@" → popup lists 5 members; type "tom" filters; ArrowDown+Enter inserts "hey @Tom Okafor "; textarea stays focused; Tom received the mention notification.
+- Activity: WEB-9 now reads "linked · blocks WEB-14" / "removed link · WEB-8".
+- Workflow: transitions list reads "within To do" / "To do → In progress".
+- Cmd/Ctrl+Enter: comment "cmd+enter test" posted from keyboard alone.
+- lint clean; tsc clean for app code (pre-existing skills/seed quirks only); console errors 0 after fresh load + palette + popover interactions.
+
+Stage Summary:
+- Round 6 shipped: 2 UX/copy fixes (workflow transition labels, link activity humanization) + 2 new features (@mentions autocomplete, per-user board column manager) + comment ⌘⏎ submit — all browser-verified in light/dark/mobile.
+- Remaining blueprint gaps: email digests/transactional email (§34), board column drag-reorder (currently buttons), custom-field inline editing on Issues table, roadmap dependency arrows, sprint auto-planning.
+- Known minor: pre-existing seed.ts/skills tsc quirks (out of app scope); dev-tools overlay can intercept preview clicks (dev-only).
+- Recommended next: email digest preview + weekly cron, board column drag-reorder via dnd-kit, Issues-table custom-field columns.

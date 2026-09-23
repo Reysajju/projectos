@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   ArrowLeftRight,
@@ -10,6 +10,7 @@ import {
   CheckCheck,
   Copy,
   GitBranch,
+  Link2,
   Loader2,
   MessageSquare,
   Pencil,
@@ -80,6 +81,8 @@ const ACTIVITY_ICONS: Record<string, typeof MessageSquare> = {
   "issue.status_changed": ArrowLeftRight,
   "issue.assigned": AtSign,
   "comment.created": MessageSquare,
+  "issue.linked": Link2,
+  "issue.link_removed": Link2,
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -87,6 +90,157 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1.5">
       <Label className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+// ─── Comment textarea with @mention autocomplete ────────────────────
+// Typing “@” (after whitespace or at the start) opens a member picker
+// above the caret line; ArrowUp/Down + Enter/Tab insert “@Full Name ”.
+
+type MentionMember = { id: string; name: string; avatarColor: string; title?: string | null };
+
+function MentionTextarea({
+  value,
+  onChange,
+  members,
+  disabled,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  members: MentionMember[];
+  disabled?: boolean;
+  onSubmit?: () => void;
+}) {
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [active, setActive] = useState(0);
+
+  const suggestions = useMemo(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    return members
+      .filter(
+        (m) =>
+          !q ||
+          m.name.toLowerCase().includes(q) ||
+          (m.title ?? "").toLowerCase().includes(q)
+      )
+      .slice(0, 6);
+  }, [mention, members]);
+
+  function detectMention(text: string, caret: number) {
+    const upto = text.slice(0, caret);
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(upto);
+    if (!m) {
+      setMention(null);
+      return;
+    }
+    const start = caret - m[1].length - 1; // index of “@”
+    setMention({ start, query: m[1] });
+    setActive(0); // restart keyboard navigation on every query change
+  }
+
+  function pick(member: MentionMember) {
+    if (!mention || !taRef.current) return;
+    const caret = taRef.current.selectionStart ?? value.length;
+    const before = `${value.slice(0, mention.start)}@${member.name} `;
+    const next = before + value.slice(caret);
+    onChange(next);
+    setMention(null);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(before.length, before.length);
+    });
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Cmd/Ctrl+Enter submits the comment regardless of the mention popup.
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      onSubmit?.();
+      return;
+    }
+    if (!mention || suggestions.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => (i + 1) % suggestions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => (i - 1 + suggestions.length) % suggestions.length);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      pick(suggestions[Math.min(active, suggestions.length - 1)]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setMention(null);
+    }
+  }
+
+  const open = mention !== null && suggestions.length > 0;
+
+  return (
+    <div className="relative">
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Mention a member"
+          className="absolute bottom-full left-0 z-50 mb-1 w-72 overflow-hidden rounded-lg border border-border bg-card shadow-lg"
+        >
+          <p className="border-b border-border bg-muted/60 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Mention member
+          </p>
+          <ul className="max-h-56 overflow-y-auto py-1">
+            {suggestions.map((m, i) => (
+              <li key={m.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === active}
+                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm transition-colors ${
+                    i === active ? "bg-amber-500/10" : "hover:bg-muted"
+                  }`}
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // keep textarea focus
+                    pick(m);
+                  }}
+                  onMouseEnter={() => setActive(i)}
+                >
+                  <Avatar name={m.name} color={m.avatarColor} size="xs" />
+                  <span className="min-w-0 flex-1 truncate font-medium text-foreground">{m.name}</span>
+                  {m.title ? (
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{m.title}</span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="border-t border-border bg-muted/40 px-2.5 py-1 text-[10px] text-muted-foreground">
+            <kbd className="font-sans">↑↓</kbd> navigate · <kbd className="font-sans">Enter</kbd> select ·{" "}
+            <kbd className="font-sans">Esc</kbd> dismiss
+          </p>
+        </div>
+      )}
+      <Textarea
+        ref={taRef}
+        rows={2}
+        placeholder="Add a comment… type @ to mention someone"
+        aria-label="New comment"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          onChange(e.target.value);
+          detectMention(e.target.value, e.target.selectionStart ?? 0);
+        }}
+        onKeyDown={onKeyDown}
+        onBlur={() => {
+          // Delay so click-based selection can win over the blur.
+          window.setTimeout(() => setMention(null), 120);
+        }}
+      />
     </div>
   );
 }
@@ -818,12 +972,11 @@ export function IssuePanel() {
                   <div className="flex items-start gap-2">
                     {me && <Avatar name={me.name} color={me.avatarColor} size="md" />}
                     <div className="flex-1 space-y-2">
-                      <Textarea
-                        rows={2}
-                        placeholder="Add a comment… use @Full Name to mention someone"
-                        aria-label="New comment"
+                      <MentionTextarea
                         value={commentDraft}
-                        onChange={(e) => setCommentDraft(e.target.value)}
+                        onChange={setCommentDraft}
+                        members={members}
+                        onSubmit={() => void postComment()}
                       />
                       <div className="flex justify-end">
                         <Button type="submit" size="sm" className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700" disabled={!commentDraft.trim() || postingComment}>
@@ -857,16 +1010,28 @@ export function IssuePanel() {
                           </span>
                           <div className="min-w-0 flex-1 text-sm">
                             <span className="font-medium text-foreground">{a.user.name}</span>{" "}
-                            <span className="text-muted-foreground">
-                              {a.field
-                                ? `changed ${a.field}`
-                                : a.type.replace("issue.", "").replace(/_/g, " ")}
-                            </span>
-                            {a.oldValue != null && a.newValue != null && (
+                            {a.type === "issue.linked" ? (
                               <span className="text-muted-foreground">
-                                : <span className="text-muted-foreground">{a.oldValue}</span> <span aria-hidden>→</span>{" "}
-                                <span className="font-medium text-foreground/90">{a.newValue}</span>
+                                linked · <span className="font-medium text-foreground/90">{a.newValue}</span>
                               </span>
+                            ) : a.type === "issue.link_removed" ? (
+                              <span className="text-muted-foreground">
+                                removed link · <span className="font-medium text-foreground/90">{a.oldValue}</span>
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-muted-foreground">
+                                  {a.field
+                                    ? `changed ${a.field}`
+                                    : a.type.replace("issue.", "").replace(/_/g, " ")}
+                                </span>
+                                {a.oldValue != null && a.newValue != null && (
+                                  <span className="text-muted-foreground">
+                                    : <span className="text-muted-foreground">{a.oldValue}</span> <span aria-hidden>→</span>{" "}
+                                    <span className="font-medium text-foreground/90">{a.newValue}</span>
+                                  </span>
+                                )}
+                              </>
                             )}
                             <div className="mt-0.5">
                               <RelativeTime date={a.createdAt} className="text-[11px] text-muted-foreground/80" />

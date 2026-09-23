@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -24,8 +24,10 @@ import { IssueCardBody } from "./IssueCard";
 import { FilterBar, matchesFilters, useIssueFilters } from "./issue-filters";
 import { useProjectData } from "./project-data";
 import { useWorkflowData } from "./use-workflow";
-import { Gauge, Plus } from "lucide-react";
+import { Gauge, Plus, Columns3, ChevronUp, ChevronDown, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +38,130 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+// ─── Board column manager (per-user, persisted via /api/preferences) ─
+
+type ColumnPrefs = { order: string[]; hidden: string[] };
+
+const COLUMNS_PREF_KEY = "board.columns";
+
+function StatusDot({ color }: { color: string }) {
+  return <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />;
+}
+
+function ColumnManagerPopover({
+  allStatuses,
+  prefs,
+  onChange,
+}: {
+  allStatuses: StatusDTO[];
+  prefs: ColumnPrefs | null;
+  onChange: (next: ColumnPrefs) => void;
+}) {
+  // Effective order = saved order (self-healed for new statuses), then hidden filter
+  // applied only for the list shown on the board — the manager itself lists all.
+  const ordered = useMemo(() => {
+    const base = prefs
+      ? (prefs.order.map((id) => allStatuses.find((s) => s.id === id)).filter(Boolean) as StatusDTO[])
+      : [];
+    for (const s of allStatuses) if (!base.some((b) => b.id === s.id)) base.push(s);
+    return base;
+  }, [allStatuses, prefs]);
+
+  const hiddenSet = new Set(prefs?.hidden ?? []);
+  const visibleCount = ordered.length - hiddenSet.size;
+
+  function toggle(id: string, show: boolean) {
+    const hidden = (prefs?.hidden ?? []).filter((h) => h !== id);
+    onChange({ order: prefs?.order ?? ordered.map((s) => s.id), hidden: show ? hidden : [...hidden, id] });
+  }
+
+  function move(id: string, dir: -1 | 1) {
+    const ids = ordered.map((s) => s.id);
+    const i = ids.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    onChange({ order: ids, hidden: prefs?.hidden ?? [] });
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+          aria-label="Manage board columns"
+        >
+          <Columns3 className="size-3.5" aria-hidden /> Columns
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-0">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <p className="text-xs font-semibold text-foreground">Board columns</p>
+          <span className="text-[10px] text-muted-foreground">
+            {visibleCount}/{ordered.length} visible
+          </span>
+        </div>
+        <ul className="max-h-64 overflow-y-auto py-1">
+          {ordered.map((s, i) => {
+            const visible = !hiddenSet.has(s.id);
+            return (
+              <li
+                key={s.id}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm"
+              >
+                <StatusDot color={s.color} />
+                <span className={cn("min-w-0 flex-1 truncate", !visible && "text-muted-foreground/60 line-through")}>
+                  {s.name}
+                </span>
+                <span className="flex items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    disabled={i === 0}
+                    aria-label={`Move ${s.name} up`}
+                    onClick={() => move(s.id, -1)}
+                  >
+                    <ChevronUp className="size-3.5" aria-hidden />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    disabled={i === ordered.length - 1}
+                    aria-label={`Move ${s.name} down`}
+                    onClick={() => move(s.id, 1)}
+                  >
+                    <ChevronDown className="size-3.5" aria-hidden />
+                  </Button>
+                </span>
+                <Switch
+                  checked={visible}
+                  disabled={!visible && visibleCount <= 1}
+                  aria-label={`${visible ? "Hide" : "Show"} ${s.name} column`}
+                  onCheckedChange={(v) => toggle(s.id, v)}
+                />
+              </li>
+            );
+          })}
+        </ul>
+        <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-2">
+          <span className="text-[10px] text-muted-foreground">Saved to your account</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => onChange({ order: allStatuses.map((s) => s.id), hidden: [] })}
+          >
+            <RotateCcw className="size-3" aria-hidden /> Reset
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function DraggableCard({ issue, onOpenIssue }: { issue: IssueDTO; onOpenIssue: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: issue.id });
@@ -160,16 +286,50 @@ export function BoardView() {
   const { filters, patch } = useIssueFilters();
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const [wipOpen, setWipOpen] = useState(false);
+  const [colPrefs, setColPrefs] = useState<ColumnPrefs | null>(null);
+
+  // Load the user's saved column layout once (self-heals to defaults).
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getPreferences()
+      .then((p) => {
+        if (cancelled) return;
+        const raw = (p as Record<string, unknown>)[COLUMNS_PREF_KEY] as ColumnPrefs | undefined;
+        if (raw && Array.isArray(raw.order)) setColPrefs({ order: raw.order, hidden: raw.hidden ?? [] });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function saveColPrefs(next: ColumnPrefs) {
+    setColPrefs(next);
+    void api.setPreference(COLUMNS_PREF_KEY, next).catch(() => {
+      toast.error("Couldn't save column layout");
+    });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor)
   );
 
-  const statuses = useMemo(
+  const allStatuses = useMemo(
     () => [...(workspace?.statuses ?? [])].sort((a, b) => a.order - b.order),
     [workspace]
   );
+
+  // Visible columns: saved order (self-healed for new statuses) minus hidden ones.
+  const statuses = useMemo(() => {
+    if (!colPrefs) return allStatuses;
+    const ordered = colPrefs.order
+      .map((id) => allStatuses.find((s) => s.id === id))
+      .filter(Boolean) as StatusDTO[];
+    for (const s of allStatuses) if (!ordered.some((o) => o.id === s.id)) ordered.push(s);
+    return ordered.filter((s) => !colPrefs.hidden.includes(s.id));
+  }, [allStatuses, colPrefs]);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -292,6 +452,7 @@ export function BoardView() {
           patch={patch}
           actions={
             <>
+              <ColumnManagerPopover allStatuses={allStatuses} prefs={colPrefs} onChange={saveColPrefs} />
               {canManage && (
                 <button
                   type="button"

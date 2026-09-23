@@ -489,7 +489,9 @@ export function WorkflowDesignerView() {
                   <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
                   <StatusChip status={to} />
                   <span className="ml-auto text-xs text-muted-foreground">
-                    {CATEGORY_LABEL[from.category]} → {CATEGORY_LABEL[to.category]}
+                    {from.category !== to.category
+                      ? `${CATEGORY_LABEL[from.category]} → ${CATEGORY_LABEL[to.category]}`
+                      : `within ${CATEGORY_LABEL[from.category]}`}
                   </span>
                   {canManage && (
                     <Button
