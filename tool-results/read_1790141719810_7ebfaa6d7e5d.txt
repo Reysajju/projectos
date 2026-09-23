@@ -1,0 +1,779 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useRef, useState } from "react";
+     4→import {
+     5→  CalendarRange,
+     6→  CheckCircle2,
+     7→  ChevronDown,
+     8→  ChevronRight,
+     9→  Ellipsis,
+    10→  ListChecks,
+    11→  Pencil,
+    12→  Play,
+    13→  Plus,
+    14→  Square,
+    15→  Trash2,
+    16→  Zap,
+    17→} from "lucide-react";
+    18→import { DndContext, DragOverlay, PointerSensor, KeyboardSensor, closestCorners, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+    19→import { format } from "date-fns";
+    20→import { toast } from "sonner";
+    21→
+    22→import { api } from "@/lib/api-client";
+    23→import { usePortalStore } from "@/lib/portal-store";
+    24→import type { IssueDTO, SprintDTO } from "@/lib/portal-types";
+    25→import { cn } from "@/lib/utils";
+    26→import { IssueCardBody } from "./IssueCard";
+    27→import { useProjectData } from "./project-data";
+    28→import { formatDateShort } from "./RelativeTime";
+    29→import { IssueTypeIcon } from "./IssueTypeIcon";
+    30→import { Button } from "@/components/ui/button";
+    31→import {
+    32→  Dialog,
+    33→  DialogContent,
+    34→  DialogDescription,
+    35→  DialogFooter,
+    36→  DialogHeader,
+    37→  DialogTitle,
+    38→} from "@/components/ui/dialog";
+    39→import {
+    40→  DropdownMenu,
+    41→  DropdownMenuContent,
+    42→  DropdownMenuItem,
+    43→  DropdownMenuSeparator,
+    44→  DropdownMenuTrigger,
+    45→} from "@/components/ui/dropdown-menu";
+    46→import { Input } from "@/components/ui/input";
+    47→import { Label } from "@/components/ui/label";
+    48→import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+    49→import { Calendar } from "@/components/ui/calendar";
+    50→import {
+    51→  Select,
+    52→  SelectContent,
+    53→  SelectItem,
+    54→  SelectTrigger,
+    55→  SelectValue,
+    56→} from "@/components/ui/select";
+    57→
+    58→// ─── Sprint dialog (create / edit / start) ──────────────────────
+    59→
+    60→function SprintDateField({
+    61→  label,
+    62→  value,
+    63→  onChange,
+    64→}: {
+    65→  label: string;
+    66→  value: Date | undefined;
+    67→  onChange: (d: Date | undefined) => void;
+    68→}) {
+    69→  const [open, setOpen] = useState(false);
+    70→  return (
+    71→    <div className="space-y-2">
+    72→      <Label>{label}</Label>
+    73→      <Popover open={open} onOpenChange={setOpen}>
+    74→        <PopoverTrigger asChild>
+    75→          <Button type="button" variant="outline" className="w-full justify-start font-normal" aria-label={label}>
+    76→            <CalendarRange className="size-4 text-muted-foreground/80" aria-hidden />
+    77→            {value ? format(value, "MMM d, yyyy") : "Pick a date"}
+    78→          </Button>
+    79→        </PopoverTrigger>
+    80→        <PopoverContent align="start" className="w-auto p-0">
+    81→          <Calendar
+    82→            mode="single"
+    83→            selected={value}
+    84→            onSelect={(d) => {
+    85→              onChange(d);
+    86→              setOpen(false);
+    87→            }}
+    88→          />
+    89→        </PopoverContent>
+    90→      </Popover>
+    91→    </div>
+    92→  );
+    93→}
+    94→
+    95→function SprintDialog({
+    96→  open,
+    97→  onOpenChange,
+    98→  projectId,
+    99→  sprint,
+   100→  mode,
+   101→  onSaved,
+   102→}: {
+   103→  open: boolean;
+   104→  onOpenChange: (o: boolean) => void;
+   105→  projectId: string;
+   106→  sprint?: SprintDTO | null;
+   107→  mode: "create" | "edit" | "start";
+   108→  onSaved?: (s: SprintDTO) => void;
+   109→}) {
+   110→  const { applySprint, data: pd } = useProjectData();
+   111→  const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
+   112→  const [name, setName] = useState("");
+   113→  const [goal, setGoal] = useState("");
+   114→  const [start, setStart] = useState<Date | undefined>(new Date());
+   115→  const [end, setEnd] = useState<Date | undefined>();
+   116→  const [busy, setBusy] = useState(false);
+   117→  const [initialized, setInitialized] = useState(false);
+   118→
+   119→  if (open && !initialized) {
+   120→    setInitialized(true);
+   121→    if (sprint) {
+   122→      setName(sprint.name);
+   123→      setGoal(sprint.goal ?? "");
+   124→      setStart(sprint.startDate ? new Date(sprint.startDate) : undefined);
+   125→      setEnd(sprint.endDate ? new Date(sprint.endDate) : undefined);
+   126→    } else {
+   127→      const existingCount = pd?.sprints.length ?? 0;
+   128→      setName(mode === "create" ? `Sprint ${existingCount + 1}` : "");
+   129→      setGoal("");
+   130→      setStart(mode === "start" ? new Date() : undefined);
+   131→      setEnd(mode === "start" ? new Date(Date.now() + 14 * 86_400_000) : undefined);
+   132→    }
+   133→  }
+   134→  if (!open && initialized) setInitialized(false);
+   135→
+   136→  async function submit(e: React.FormEvent) {
+   137→    e.preventDefault();
+   138→    if (!name.trim()) {
+   139→      toast.error("Sprint name is required");
+   140→      return;
+   141→    }
+   142→    setBusy(true);
+   143→    try {
+   144→      let saved: SprintDTO;
+   145→      if (mode === "create") {
+   146→        saved = await api.createSprint({
+   147→          projectId,
+   148→          name: name.trim(),
+   149→          goal: goal.trim() || undefined,
+   150→          startDate: start ? start.toISOString() : undefined,
+   151→          endDate: end ? end.toISOString() : undefined,
+   152→        });
+   153→        toast.success(`Sprint “${saved.name}” created`);
+   154→      } else if (mode === "start") {
+   155→        saved = await api.patchSprint(sprint!.id, {
+   156→          status: "ACTIVE",
+   157→          startDate: start ? start.toISOString() : null,
+   158→          endDate: end ? end.toISOString() : null,
+   159→        });
+   160→        toast.success(`Sprint “${saved.name}” started`);
+   161→      } else {
+   162→        saved = await api.patchSprint(sprint!.id, {
+   163→          name: name.trim(),
+   164→          goal: goal.trim() || null,
+   165→          startDate: start ? start.toISOString() : null,
+   166→          endDate: end ? end.toISOString() : null,
+   167→        });
+   168→        toast.success("Sprint updated");
+   169→      }
+   170→      applySprint(saved);
+   171→      await refreshWorkspace();
+   172→      onOpenChange(false);
+   173→      onSaved?.(saved);
+   174→    } catch (err) {
+   175→      toast.error(err instanceof Error ? err.message : "Failed to save sprint");
+   176→    } finally {
+   177→      setBusy(false);
+   178→    }
+   179→  }
+   180→
+   181→  return (
+   182→    <Dialog open={open} onOpenChange={onOpenChange}>
+   183→      <DialogContent className="sm:max-w-md">
+   184→        <DialogHeader>
+   185→          <DialogTitle>
+   186→            {mode === "create" ? "Create sprint" : mode === "start" ? `Start ${sprint?.name}` : "Edit sprint"}
+   187→          </DialogTitle>
+   188→          <DialogDescription>
+   189→            {mode === "start"
+   190→              ? "Set the sprint window. Only one sprint can be active per project."
+   191→              : "Sprints group issues into time-boxed iterations."}
+   192→          </DialogDescription>
+   193→        </DialogHeader>
+   194→        <form onSubmit={submit} className="space-y-4">
+   195→          <div className="space-y-2">
+   196→            <Label htmlFor="sprint-name">Name</Label>
+   197→            <Input
+   198→              id="sprint-name"
+   199→              required
+   200→              placeholder="Sprint 1"
+   201→              value={name}
+   202→              onChange={(e) => setName(e.target.value)}
+   203→            />
+   204→          </div>
+   205→          <div className="space-y-2">
+   206→            <Label htmlFor="sprint-goal">Goal</Label>
+   207→            <Input
+   208→              id="sprint-goal"
+   209→              placeholder="What should this sprint achieve?"
+   210→              value={goal}
+   211→              onChange={(e) => setGoal(e.target.value)}
+   212→            />
+   213→          </div>
+   214→          <div className="grid grid-cols-2 gap-3">
+   215→            <SprintDateField label="Start date" value={start} onChange={setStart} />
+   216→            <SprintDateField label="End date" value={end} onChange={setEnd} />
+   217→          </div>
+   218→          <DialogFooter>
+   219→            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+   220→              Cancel
+   221→            </Button>
+   222→            <Button type="submit" disabled={busy} className="bg-amber-600 text-white hover:bg-amber-700">
+   223→              {mode === "start" ? "Start sprint" : mode === "create" ? "Create sprint" : "Save"}
+   224→            </Button>
+   225→          </DialogFooter>
+   226→        </form>
+   227→      </DialogContent>
+   228→    </Dialog>
+   229→  );
+   230→}
+   231→
+   232→function CompleteSprintDialog({
+   233→  sprint,
+   234→  issues,
+   235→  open,
+   236→  onOpenChange,
+   237→}: {
+   238→  sprint: SprintDTO;
+   239→  issues: IssueDTO[];
+   240→  open: boolean;
+   241→  onOpenChange: (o: boolean) => void;
+   242→}) {
+   243→  const { applySprint, refetch } = useProjectData();
+   244→  const refreshWorkspace = usePortalStore((s) => s.refreshWorkspace);
+   245→  const [busy, setBusy] = useState(false);
+   246→  const unfinished = issues.filter((i) => i.status.category !== "DONE");
+   247→
+   248→  async function complete() {
+   249→    setBusy(true);
+   250→    try {
+   251→      const saved = await api.patchSprint(sprint.id, { status: "COMPLETED" });
+   252→      applySprint(saved);
+   253→      toast.success(
+   254→        `Sprint completed · ${issues.length - unfinished.length} done, ${unfinished.length} moved to backlog`
+   255→      );
+   256→      await refreshWorkspace();
+   257→      onOpenChange(false);
+   258→      void refetch();
+   259→    } catch (err) {
+   260→      toast.error(err instanceof Error ? err.message : "Failed to complete sprint");
+   261→    } finally {
+   262→      setBusy(false);
+   263→    }
+   264→  }
+   265→
+   266→  return (
+   267→    <Dialog open={open} onOpenChange={onOpenChange}>
+   268→      <DialogContent className="sm:max-w-md">
+   269→        <DialogHeader>
+   270→          <DialogTitle>Complete {sprint.name}?</DialogTitle>
+   271→          <DialogDescription>
+   272→            {issues.length - unfinished.length} issue
+   273→            {issues.length - unfinished.length === 1 ? "" : "s"} are done and will stay in the sprint.
+   274→            {unfinished.length > 0 && (
+   275→              <>
+   276→                {" "}
+   277→                <span className="font-medium text-foreground/90">
+   278→                  {unfinished.length} unfinished issue{unfinished.length === 1 ? "" : "s"}
+   279→                </span>{" "}
+   280→                will move back to the backlog.
+   281→              </>
+   282→            )}
+   283→          </DialogDescription>
+   284→        </DialogHeader>
+   285→        <DialogFooter>
+   286→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   287→            Cancel
+   288→          </Button>
+   289→          <Button onClick={() => void complete()} disabled={busy} className="bg-emerald-600 text-white hover:bg-emerald-700">
+   290→            <CheckCircle2 className="size-4" aria-hidden /> Complete sprint
+   291→          </Button>
+   292→        </DialogFooter>
+   293→      </DialogContent>
+   294→    </Dialog>
+   295→  );
+   296→}
+   297→
+   298→// ─── Drag pieces ────────────────────────────────────────────────
+   299→
+   300→function BacklogCard({ issue, onOpenIssue }: { issue: IssueDTO; onOpenIssue: (id: string) => void }) {
+   301→  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: issue.id });
+   302→  const downPos = useRef<{ x: number; y: number } | null>(null);
+   303→  return (
+   304→    <div
+   305→      ref={setNodeRef}
+   306→      {...attributes}
+   307→      {...listeners}
+   308→      onPointerDownCapture={(e) => downPos.current = { x: e.clientX, y: e.clientY }}
+   309→      onClick={(e) => {
+   310→        const d = downPos.current;
+   311→        if (d && (Math.abs(e.clientX - d.x) > 6 || Math.abs(e.clientY - d.y) > 6)) return;
+   312→        onOpenIssue(issue.id);
+   313→      }}
+   314→      onKeyDown={(e) => {
+   315→        if (e.key === "Enter") onOpenIssue(issue.id);
+   316→      }}
+   317→      role="button"
+   318→      tabIndex={0}
+   319→      aria-label={`Issue ${issue.key}: ${issue.summary}`}
+   320→      className={cn(
+   321→        "touch-none cursor-grab rounded-lg active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60",
+   322→        isDragging && "opacity-40"
+   323→      )}
+   324→    >
+   325→      <IssueCardBody issue={issue} />
+   326→    </div>
+   327→  );
+   328→}
+   329→
+   330→function DropSection({
+   331→  dropId,
+   332→  children,
+   333→  className,
+   334→}: {
+   335→  dropId: string;
+   336→  children: React.ReactNode;
+   337→  className?: string;
+   338→}) {
+   339→  const { setNodeRef, isOver } = useDroppable({ id: dropId });
+   340→  return (
+   341→    <div
+   342→      ref={setNodeRef}
+   343→      className={cn(
+   344→        "transition-colors",
+   345→        isOver && "ring-2 ring-inset ring-amber-500/40 rounded-lg",
+   346→        className
+   347→      )}
+   348→    >
+   349→      {children}
+   350→    </div>
+   351→  );
+   352→}
+   353→
+   354→// ─── Main view ──────────────────────────────────────────────────
+   355→
+   356→export function BacklogView() {
+   357→  const { data, applyIssue, addIssue, removeSprint, refetch } = useProjectData();
+   358→  const workspace = usePortalStore((s) => s.workspace);
+   359→  const setOpenIssue = usePortalStore((s) => s.setOpenIssue);
+   360→  const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
+   361→  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+   362→
+   363→  const [sprintDialog, setSprintDialog] = useState<
+   364→    { mode: "create" } | { mode: "edit" | "start"; sprint: SprintDTO } | null
+   365→  >(null);
+   366→  const [completeSprint, setCompleteSprint] = useState<SprintDTO | null>(null);
+   367→  const [deleteSprintTarget, setDeleteSprintTarget] = useState<SprintDTO | null>(null);
+   368→
+   369→  // inline create row
+   370→  const [inlineSummary, setInlineSummary] = useState("");
+   371→  const [inlineTypeId, setInlineTypeId] = useState<string>("");
+   372→  const [inlineBusy, setInlineBusy] = useState(false);
+   373→
+   374→  const sensors = useSensors(
+   375→    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+   376→    useSensor(KeyboardSensor)
+   377→  );
+   378→
+   379→  const project = data?.project;
+   380→  const issues = data?.issues ?? [];
+   381→  const sprints = data?.sprints ?? [];
+   382→  const types = workspace?.issueTypes ?? [];
+   383→
+   384→  const activeSprints = useMemo(
+   385→    () => sprints.filter((s) => s.status === "ACTIVE").sort((a, b) => a.order - b.order),
+   386→    [sprints]
+   387→  );
+   388→  const futureSprints = useMemo(
+   389→    () => sprints.filter((s) => s.status === "FUTURE").sort((a, b) => a.order - b.order),
+   390→    [sprints]
+   391→  );
+   392→  const completedSprints = useMemo(
+   393→    () => sprints.filter((s) => s.status === "COMPLETED").sort((a, b) => a.order - b.order),
+   394→    [sprints]
+   395→  );
+   396→
+   397→  const sprintIssues = useMemo(() => {
+   398→    const map = new Map<string, IssueDTO[]>();
+   399→    for (const s of sprints) map.set(s.id, []);
+   400→    const backlog: IssueDTO[] = [];
+   401→    for (const i of issues) {
+   402→      if (i.sprintId && map.has(i.sprintId)) map.get(i.sprintId)!.push(i);
+   403→      else if (!i.sprintId) backlog.push(i);
+   404→    }
+   405→    const cmp = (a: IssueDTO, b: IssueDTO) => a.order - b.order;
+   406→    for (const list of map.values()) list.sort(cmp);
+   407→    backlog.sort(cmp);
+   408→    return { map, backlog };
+   409→  }, [issues, sprints]);
+   410→
+   411→  const activeIssue = activeIssueId ? issues.find((i) => i.id === activeIssueId) ?? null : null;
+   412→
+   413→  function onDragStart(e: DragStartEvent) {
+   414→    setActiveIssueId(String(e.active.id));
+   415→  }
+   416→
+   417→  async function onDragEnd(e: DragEndEvent) {
+   418→    const activeId = String(e.active.id);
+   419→    setActiveIssueId(null);
+   420→    if (!e.over) return;
+   421→    const issue = issues.find((i) => i.id === activeId);
+   422→    if (!issue) return;
+   423→
+   424→    const overId = String(e.over.id);
+   425→    let targetSprintId: string | null;
+   426→    let targetLabel: string;
+   427→    if (overId === "backlog") {
+   428→      targetSprintId = null;
+   429→      targetLabel = "backlog";
+   430→    } else if (overId.startsWith("sprint:")) {
+   431→      targetSprintId = overId.slice(7);
+   432→      const sprint = sprints.find((s) => s.id === targetSprintId);
+   433→      if (!sprint) return;
+   434→      if (sprint.status === "COMPLETED") {
+   435→        toast.error("Can't move issues into a completed sprint");
+   436→        return;
+   437→      }
+   438→      targetLabel = sprint.name;
+   439→    } else {
+   440→      return;
+   441→    }
+   442→
+   443→    if (issue.sprintId === targetSprintId) return;
+   444→
+   445→    // Optimistic
+   446→    applyIssue({ ...issue, sprintId: targetSprintId });
+   447→
+   448→    try {
+   449→      const updated = await api.patchIssue(issue.id, { sprintId: targetSprintId });
+   450→      applyIssue(updated);
+   451→      toast.success(`${issue.key} moved to ${targetLabel}`);
+   452→    } catch (err) {
+   453→      toast.error(err instanceof Error ? err.message : "Failed to move issue");
+   454→      void refetch();
+   455→    }
+   456→  }
+   457→
+   458→  async function submitInline(e: React.FormEvent) {
+   459→    e.preventDefault();
+   460→    if (!project || !inlineSummary.trim() || !inlineTypeId) return;
+   461→    setInlineBusy(true);
+   462→    try {
+   463→      const created = await api.createIssue({
+   464→        projectId: project.id,
+   465→        typeId: inlineTypeId,
+   466→        summary: inlineSummary.trim(),
+   467→      });
+   468→      addIssue(created);
+   469→      setInlineSummary("");
+   470→      toast.success(`${created.key} added to backlog`);
+   471→    } catch (err) {
+   472→      toast.error(err instanceof Error ? err.message : "Failed to create issue");
+   473→    } finally {
+   474→      setInlineBusy(false);
+   475→    }
+   476→  }
+   477→
+   478→  async function deleteSprintNow(sprint: SprintDTO) {
+   479→    try {
+   480→      await api.deleteSprint(sprint.id);
+   481→      removeSprint(sprint.id);
+   482→      toast.success(`Sprint “${sprint.name}” deleted — its issues moved to the backlog`);
+   483→    } catch (err) {
+   484→      toast.error(err instanceof Error ? err.message : "Failed to delete sprint");
+   485→    }
+   486→  }
+   487→
+   488→  if (!data || !project) return null;
+   489→
+   490→  const sprintSection = (sprint: SprintDTO, issuesIn: IssueDTO[]) => {
+   491→    const isCollapsed = collapsed[sprint.id] ?? false;
+   492→    const points = issuesIn.reduce((acc, i) => acc + (i.storyPoints ?? 0), 0);
+   493→    const donePoints = issuesIn.reduce((acc, i) => (i.status.category === "DONE" ? acc + (i.storyPoints ?? 0) : acc), 0);
+   494→    return (
+   495→      <DropSection key={sprint.id} dropId={`sprint:${sprint.id}`} className="rounded-lg">
+   496→        <section className="rounded-lg border border-border bg-card">
+   497→          <header className="flex flex-wrap items-center gap-2 px-4 py-3">
+   498→            <button
+   499→              type="button"
+   500→              aria-label={isCollapsed ? `Expand ${sprint.name}` : `Collapse ${sprint.name}`}
+   501→              aria-expanded={!isCollapsed}
+   502→              onClick={() => setCollapsed((c) => ({ ...c, [sprint.id]: !isCollapsed }))}
+   503→              className="rounded p-0.5 text-muted-foreground/80 hover:bg-muted hover:text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+   504→            >
+   505→              {isCollapsed ? <ChevronRight className="size-4" aria-hidden /> : <ChevronDown className="size-4" aria-hidden />}
+   506→            </button>
+   507→            <h3 className="text-sm font-semibold text-foreground">{sprint.name}</h3>
+   508→            <span
+   509→              className={cn(
+   510→                "rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide",
+   511→                sprint.status === "ACTIVE"
+   512→                  ? "bg-amber-100 text-amber-600"
+   513→                  : "bg-muted text-muted-foreground"
+   514→              )}
+   515→            >
+   516→              {sprint.status}
+   517→            </span>
+   518→            {(sprint.startDate || sprint.endDate) && (
+   519→              <span className="hidden items-center gap-1 text-xs text-muted-foreground/80 sm:flex">
+   520→                <CalendarRange className="size-3" aria-hidden />
+   521→                {formatDateShort(sprint.startDate)} – {formatDateShort(sprint.endDate)}
+   522→              </span>
+   523→            )}
+   524→            {isCollapsed && (
+   525→              <span className="flex items-center gap-1 text-xs text-muted-foreground/80">
+   526→                <ListChecks className="size-3" aria-hidden /> {issuesIn.length}
+   527→              </span>
+   528→            )}
+   529→            <span className="ml-auto text-xs text-muted-foreground/80">
+   530→              {donePoints}/{points} pts · {issuesIn.length} issue{issuesIn.length === 1 ? "" : "s"}
+   531→            </span>
+   532→            <DropdownMenu>
+   533→              <DropdownMenuTrigger asChild>
+   534→                <Button variant="ghost" size="icon" className="size-7" aria-label={`Sprint ${sprint.name} actions`}>
+   535→                  <Ellipsis className="size-4" aria-hidden />
+   536→                </Button>
+   537→              </DropdownMenuTrigger>
+   538→              <DropdownMenuContent align="end" className="w-44">
+   539→                {sprint.status === "FUTURE" && (
+   540→                  <DropdownMenuItem onSelect={() => setSprintDialog({ mode: "start", sprint })}>
+   541→                    <Play className="size-4" aria-hidden /> Start sprint
+   542→                  </DropdownMenuItem>
+   543→                )}
+   544→                {sprint.status === "ACTIVE" && (
+   545→                  <DropdownMenuItem onSelect={() => setCompleteSprint(sprint)}>
+   546→                    <CheckCircle2 className="size-4" aria-hidden /> Complete sprint
+   547→                  </DropdownMenuItem>
+   548→                )}
+   549→                {sprint.status !== "COMPLETED" && (
+   550→                  <DropdownMenuItem onSelect={() => setSprintDialog({ mode: "edit", sprint })}>
+   551→                    <Pencil className="size-4" aria-hidden /> Edit sprint
+   552→                  </DropdownMenuItem>
+   553→                )}
+   554→                <DropdownMenuSeparator />
+   555→                <DropdownMenuItem variant="destructive" onSelect={() => setDeleteSprintTarget(sprint)}>
+   556→                  <Trash2 className="size-4" aria-hidden /> Delete sprint
+   557→                </DropdownMenuItem>
+   558→              </DropdownMenuContent>
+   559→            </DropdownMenu>
+   560→          </header>
+   561→          {sprint.goal && !isCollapsed && (
+   562→            <p className="px-4 pb-2 text-xs text-muted-foreground">🎯 {sprint.goal}</p>
+   563→          )}
+   564→          {!isCollapsed && (
+   565→            <div className="max-h-[420px] space-y-2 overflow-y-auto px-4 pb-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
+   566→              {issuesIn.length === 0 ? (
+   567→                <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground/80">
+   568→                  Drag issues here from the backlog
+   569→                </p>
+   570→              ) : (
+   571→                issuesIn.map((issue) => (
+   572→                  <BacklogCard key={issue.id} issue={issue} onOpenIssue={setOpenIssue} />
+   573→                ))
+   574→              )}
+   575→            </div>
+   576→          )}
+   577→        </section>
+   578→      </DropSection>
+   579→    );
+   580→  };
+   581→
+   582→  return (
+   583→    <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+   584→      <div className="flex flex-wrap items-center justify-between gap-2">
+   585→        <div>
+   586→          <h2 className="text-base font-semibold text-foreground">Backlog & sprints</h2>
+   587→          <p className="text-xs text-muted-foreground">
+   588→            Drag issues between the backlog and sprints to plan iterations.
+   589→          </p>
+   590→        </div>
+   591→        <Button
+   592→          size="sm"
+   593→          variant="outline"
+   594→          className="gap-1.5"
+   595→          onClick={() => setSprintDialog({ mode: "create" })}
+   596→        >
+   597→          <Plus className="size-3.5" aria-hidden /> Create sprint
+   598→        </Button>
+   599→      </div>
+   600→
+   601→      <DndContext
+   602→        sensors={sensors}
+   603→        collisionDetection={closestCorners}
+   604→        onDragStart={onDragStart}
+   605→        onDragEnd={onDragEnd}
+   606→        onDragCancel={() => setActiveIssueId(null)}
+   607→      >
+   608→        <div className="space-y-4">
+   609→          {activeSprints.map((s) => sprintSection(s, sprintIssues.map.get(s.id) ?? []))}
+   610→          {futureSprints.map((s) => sprintSection(s, sprintIssues.map.get(s.id) ?? []))}
+   611→
+   612→          {/* Backlog section */}
+   613→          <DropSection dropId="backlog" className="rounded-lg">
+   614→            <section className="rounded-lg border border-border bg-card">
+   615→              <header className="flex items-center gap-2 px-4 py-3">
+   616→                <Square className="size-3.5 text-muted-foreground/80" aria-hidden />
+   617→                <h3 className="text-sm font-semibold text-foreground">Backlog</h3>
+   618→                <span className="text-xs text-muted-foreground/80">
+   619→                  {sprintIssues.backlog.length} issue{sprintIssues.backlog.length === 1 ? "" : "s"}
+   620→                </span>
+   621→              </header>
+   622→
+   623→              {/* Inline create row */}
+   624→              {project.archived ? (
+   625→                <p className="mx-4 mb-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+   626→                  This project is archived — read-only.
+   627→                </p>
+   628→              ) : (
+   629→                <form onSubmit={submitInline} className="mx-4 mb-3 flex flex-wrap items-center gap-2">
+   630→                  <Select value={inlineTypeId || undefined} onValueChange={setInlineTypeId}>
+   631→                    <SelectTrigger size="sm" className="h-8 w-36 shrink-0" aria-label="Issue type">
+   632→                      <SelectValue placeholder="Type" />
+   633→                    </SelectTrigger>
+   634→                    <SelectContent>
+   635→                      {types.map((t) => (
+   636→                        <SelectItem key={t.id} value={t.id}>
+   637→                          <span className="flex items-center gap-2">
+   638→                            <IssueTypeIcon type={t} size={12} /> {t.name}
+   639→                          </span>
+   640→                        </SelectItem>
+   641→                      ))}
+   642→                    </SelectContent>
+   643→                  </Select>
+   644→                  <Input
+   645→                    className="h-8 flex-1"
+   646→                    placeholder="What needs to be done? Press Enter to add…"
+   647→                    aria-label="New backlog issue summary"
+   648→                    value={inlineSummary}
+   649→                    onChange={(e) => setInlineSummary(e.target.value)}
+   650→                    disabled={inlineBusy}
+   651→                  />
+   652→                  <Button
+   653→                    type="submit"
+   654→                    size="sm"
+   655→                    variant="secondary"
+   656→                    className="h-8 gap-1"
+   657→                    disabled={inlineBusy || !inlineSummary.trim() || !inlineTypeId}
+   658→                  >
+   659→                    <Plus className="size-3.5" aria-hidden /> Add
+   660→                  </Button>
+   661→                </form>
+   662→              )}
+   663→
+   664→              <div className="max-h-[520px] space-y-2 overflow-y-auto px-4 pb-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 [&::-webkit-scrollbar]:w-1.5">
+   665→                {sprintIssues.backlog.length === 0 ? (
+   666→                  <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground/80">
+   667→                    Backlog is empty — add an issue above or drag one out of a sprint.
+   668→                  </p>
+   669→                ) : (
+   670→                  sprintIssues.backlog.map((issue) => (
+   671→                    <BacklogCard key={issue.id} issue={issue} onOpenIssue={setOpenIssue} />
+   672→                  ))
+   673→                )}
+   674→              </div>
+   675→            </section>
+   676→          </DropSection>
+   677→
+   678→          {/* Completed sprints (read-only) */}
+   679→          {completedSprints.length > 0 && (
+   680→            <section className="rounded-lg border border-border bg-muted/50">
+   681→              <header className="flex items-center gap-2 px-4 py-3">
+   682→                <Zap className="size-3.5 text-emerald-600" aria-hidden />
+   683→                <h3 className="text-sm font-semibold text-muted-foreground">Completed sprints</h3>
+   684→              </header>
+   685→              <div className="space-y-1.5 px-4 pb-4">
+   686→                {completedSprints.map((s) => {
+   687→                  const list = sprintIssues.map.get(s.id) ?? [];
+   688→                  const done = list.filter((i) => i.status.category === "DONE").length;
+   689→                  return (
+   690→                    <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-md bg-card px-3 py-2 text-xs text-muted-foreground">
+   691→                      <span className="font-medium text-foreground/90">{s.name}</span>
+   692→                      <span className="text-muted-foreground/80">
+   693→                        {done}/{list.length} done
+   694→                      </span>
+   695→                      <span className="ml-auto">{formatDateShort(s.endDate)}</span>
+   696→                    </div>
+   697→                  );
+   698→                })}
+   699→              </div>
+   700→            </section>
+   701→          )}
+   702→        </div>
+   703→
+   704→        <DragOverlay dropAnimation={{ duration: 180 }}>
+   705→          {activeIssue ? (
+   706→            <div className="w-[300px] cursor-grabbing">
+   707→              <IssueCardBody issue={activeIssue} dragging />
+   708→            </div>
+   709→          ) : null}
+   710→        </DragOverlay>
+   711→      </DndContext>
+   712→
+   713→      {/* Sprint dialogs */}
+   714→      {sprintDialog?.mode === "create" && (
+   715→        <SprintDialog
+   716→          open
+   717→          mode="create"
+   718→          projectId={project.id}
+   719→          onOpenChange={(o) => !o && setSprintDialog(null)}
+   720→        />
+   721→      )}
+   722→      {sprintDialog?.mode === "edit" && (
+   723→        <SprintDialog
+   724→          open
+   725→          mode="edit"
+   726→          projectId={project.id}
+   727→          sprint={sprintDialog.sprint}
+   728→          onOpenChange={(o) => !o && setSprintDialog(null)}
+   729→        />
+   730→      )}
+   731→      {sprintDialog?.mode === "start" && (
+   732→        <SprintDialog
+   733→          open
+   734→          mode="start"
+   735→          projectId={project.id}
+   736→          sprint={sprintDialog.sprint}
+   737→          onOpenChange={(o) => !o && setSprintDialog(null)}
+   738→        />
+   739→      )}
+   740→      {completeSprint && (
+   741→        <CompleteSprintDialog
+   742→          sprint={completeSprint}
+   743→          issues={sprintIssues.map.get(completeSprint.id) ?? []}
+   744→          open
+   745→          onOpenChange={(o) => !o && setCompleteSprint(null)}
+   746→        />
+   747→      )}
+   748→
+   749→      {/* Delete sprint confirm */}
+   750→      <Dialog open={deleteSprintTarget !== null} onOpenChange={(o) => !o && setDeleteSprintTarget(null)}>
+   751→        <DialogContent className="sm:max-w-sm">
+   752→          <DialogHeader>
+   753→            <DialogTitle>Delete {deleteSprintTarget?.name}?</DialogTitle>
+   754→            <DialogDescription>
+   755→              The sprint will be removed. Its {sprintIssues.map.get(deleteSprintTarget?.id ?? "")?.length ?? 0} issue
+   756→              {sprintIssues.map.get(deleteSprintTarget?.id ?? "")?.length === 1 ? "" : "s"} will move back to the
+   757→              backlog.
+   758→            </DialogDescription>
+   759→          </DialogHeader>
+   760→          <DialogFooter>
+   761→            <Button variant="outline" onClick={() => setDeleteSprintTarget(null)}>
+   762→              Cancel
+   763→            </Button>
+   764→            <Button
+   765→              variant="destructive"
+   766→              onClick={() => {
+   767→                if (deleteSprintTarget) void deleteSprintNow(deleteSprintTarget);
+   768→                setDeleteSprintTarget(null);
+   769→              }}
+   770→            >
+   771→              <Trash2 className="size-4" aria-hidden /> Delete sprint
+   772→            </Button>
+   773→          </DialogFooter>
+   774→        </DialogContent>
+   775→      </Dialog>
+   776→    </div>
+   777→  );
+   778→}
+   779→

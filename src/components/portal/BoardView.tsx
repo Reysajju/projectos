@@ -7,6 +7,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  closestCenter,
   useDraggable,
   useDroppable,
   useSensor,
@@ -14,6 +15,14 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
@@ -24,7 +33,7 @@ import { IssueCardBody } from "./IssueCard";
 import { FilterBar, matchesFilters, useIssueFilters } from "./issue-filters";
 import { useProjectData } from "./project-data";
 import { useWorkflowData } from "./use-workflow";
-import { Gauge, Plus, Columns3, ChevronUp, ChevronDown, RotateCcw } from "lucide-react";
+import { Gauge, Plus, Columns3, ChevronUp, ChevronDown, GripVertical, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
@@ -49,6 +58,78 @@ function StatusDot({ color }: { color: string }) {
   return <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />;
 }
 
+function SortableStatusRow({
+  status,
+  visible,
+  visibleCount,
+  first,
+  last,
+  onMove,
+  onToggle,
+}: {
+  status: StatusDTO;
+  visible: boolean;
+  visibleCount: number;
+  first: boolean;
+  last: boolean;
+  onMove: (id: string, dir: -1 | 1) => void;
+  onToggle: (id: string, show: boolean) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: status.id });
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm",
+        isDragging && "relative z-10 bg-muted shadow-md ring-1 ring-amber-500/40"
+      )}
+    >
+      <button
+        type="button"
+        aria-label={`Reorder ${status.name} column`}
+        className="-ml-1 rounded p-0.5 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-3.5 cursor-grab active:cursor-grabbing" aria-hidden />
+      </button>
+      <StatusDot color={status.color} />
+      <span className={cn("min-w-0 flex-1 truncate", !visible && "text-muted-foreground/60 line-through")}>
+        {status.name}
+      </span>
+      <span className="flex items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6 text-muted-foreground hover:text-foreground"
+          disabled={first}
+          aria-label={`Move ${status.name} up`}
+          onClick={() => onMove(status.id, -1)}
+        >
+          <ChevronUp className="size-3.5" aria-hidden />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6 text-muted-foreground hover:text-foreground"
+          disabled={last}
+          aria-label={`Move ${status.name} down`}
+          onClick={() => onMove(status.id, 1)}
+        >
+          <ChevronDown className="size-3.5" aria-hidden />
+        </Button>
+      </span>
+      <Switch
+        checked={visible}
+        disabled={!visible && visibleCount <= 1}
+        aria-label={`${visible ? "Hide" : "Show"} ${status.name} column`}
+        onCheckedChange={(v) => onToggle(status.id, v)}
+      />
+    </li>
+  );
+}
+
 function ColumnManagerPopover({
   allStatuses,
   prefs,
@@ -58,6 +139,11 @@ function ColumnManagerPopover({
   prefs: ColumnPrefs | null;
   onChange: (next: ColumnPrefs) => void;
 }) {
+  const reorderSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
   // Effective order = saved order (self-healed for new statuses), then hidden filter
   // applied only for the list shown on the board — the manager itself lists all.
   const ordered = useMemo(() => {
@@ -85,6 +171,16 @@ function ColumnManagerPopover({
     onChange({ order: ids, hidden: prefs?.hidden ?? [] });
   }
 
+  function onReorderEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const ids = ordered.map((s) => s.id);
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    onChange({ order: arrayMove(ids, from, to), hidden: prefs?.hidden ?? [] });
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -103,52 +199,26 @@ function ColumnManagerPopover({
             {visibleCount}/{ordered.length} visible
           </span>
         </div>
-        <ul className="max-h-64 overflow-y-auto py-1">
-          {ordered.map((s, i) => {
-            const visible = !hiddenSet.has(s.id);
-            return (
-              <li
-                key={s.id}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm"
-              >
-                <StatusDot color={s.color} />
-                <span className={cn("min-w-0 flex-1 truncate", !visible && "text-muted-foreground/60 line-through")}>
-                  {s.name}
-                </span>
-                <span className="flex items-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
-                    disabled={i === 0}
-                    aria-label={`Move ${s.name} up`}
-                    onClick={() => move(s.id, -1)}
-                  >
-                    <ChevronUp className="size-3.5" aria-hidden />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
-                    disabled={i === ordered.length - 1}
-                    aria-label={`Move ${s.name} down`}
-                    onClick={() => move(s.id, 1)}
-                  >
-                    <ChevronDown className="size-3.5" aria-hidden />
-                  </Button>
-                </span>
-                <Switch
-                  checked={visible}
-                  disabled={!visible && visibleCount <= 1}
-                  aria-label={`${visible ? "Hide" : "Show"} ${s.name} column`}
-                  onCheckedChange={(v) => toggle(s.id, v)}
+        <DndContext sensors={reorderSensors} collisionDetection={closestCenter} onDragEnd={onReorderEnd}>
+          <SortableContext items={ordered.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            <ul className="max-h-64 overflow-y-auto py-1 px-1">
+              {ordered.map((s, i) => (
+                <SortableStatusRow
+                  key={s.id}
+                  status={s}
+                  visible={!hiddenSet.has(s.id)}
+                  visibleCount={visibleCount}
+                  first={i === 0}
+                  last={i === ordered.length - 1}
+                  onMove={move}
+                  onToggle={toggle}
                 />
-              </li>
-            );
-          })}
-        </ul>
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
         <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-2">
-          <span className="text-[10px] text-muted-foreground">Saved to your account</span>
+          <span className="text-[10px] text-muted-foreground">Drag to reorder · saved to your account</span>
           <Button
             variant="ghost"
             size="sm"

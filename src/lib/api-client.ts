@@ -351,4 +351,7 @@ export const apiDigest = {
     apiFetch<{ sent: number; kind: string }>("/api/digest", jsonBody(body, "POST")),
 
   log: () => apiFetch<EmailsPayload>("/api/emails"),
+
+  /** Prune outbox rows older than the retention window (ADMIN/MANAGER). */
+  prune: () => apiFetch<{ deleted: number; retentionDays: number }>("/api/emails", { method: "DELETE" }),
 };

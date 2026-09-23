@@ -641,6 +641,8 @@ export interface EmailLogDTO {
 
 export interface EmailsPayload {
   emails: EmailLogDTO[];
+  total: number;
+  retentionDays: number;
 }
 
 export type DigestKindDTO = DigestKind;

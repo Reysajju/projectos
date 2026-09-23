@@ -125,6 +125,7 @@ export function RoadmapView() {
   const [overrides, setOverrides] = useState<Map<string, ScheduleOverride>>(new Map());
   const [showLinks, setShowLinks] = useState(true);
   const [showStories, setShowStories] = useState(true);
+  const [hoverEdge, setHoverEdge] = useState<IssueEdgeDTO | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
 
@@ -220,6 +221,12 @@ export function RoadmapView() {
   }, [data, epics, scheduleOf, stories]);
 
   const timelineW = (window_?.totalDays ?? 1) * dayW;
+
+  /** Issues whose rows light up while a dependency arrow is hovered. */
+  const highlightIds = useMemo(
+    () => (hoverEdge ? new Set([hoverEdge.sourceId, hoverEdge.targetId]) : new Set<string>()),
+    [hoverEdge]
+  );
 
   const months = useMemo(() => {
     if (!window_) return [];
@@ -433,7 +440,7 @@ export function RoadmapView() {
             </svg>
             Dependency
           </span>
-          <span className="hidden items-center gap-1.5 md:flex">Drag bars to reschedule</span>
+          <span className="hidden items-center gap-1.5 md:flex">Hover an arrow to trace its issues</span>
         </div>
       </div>
 
@@ -506,6 +513,8 @@ export function RoadmapView() {
                   labelW={LABEL_W}
                   timelineW={timelineW}
                   issues={data.issues}
+                  hoveredId={hoverEdge?.id ?? null}
+                  onHover={setHoverEdge}
                 />
               )}
 
@@ -534,7 +543,14 @@ export function RoadmapView() {
 
                 if (!base.start && !dragState) {
                   return (
-                    <div key={epic.id} className="relative flex items-center border-b border-border/40" style={{ height: ROW_H }}>
+                    <div
+                      key={epic.id}
+                      className={cn(
+                        "relative flex items-center border-b border-border/40",
+                        highlightIds.has(epic.id) && "bg-amber-500/10 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.35)]"
+                      )}
+                      style={{ height: ROW_H }}
+                    >
                       <EpicRowLabel
                         epic={epic}
                         progress={progress}
@@ -554,7 +570,13 @@ export function RoadmapView() {
 
                 return (
                   <div key={epic.id}>
-                    <div className="relative flex border-b border-border/40 hover:bg-muted/20" style={{ height: ROW_H }}>
+                    <div
+                      className={cn(
+                        "relative flex border-b border-border/40 hover:bg-muted/20",
+                        highlightIds.has(epic.id) && "bg-amber-500/10 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.35)]"
+                      )}
+                      style={{ height: ROW_H }}
+                    >
                       <EpicRowLabel
                         epic={epic}
                         progress={progress}
@@ -623,7 +645,16 @@ export function RoadmapView() {
                     {/* children */}
                     {!isCollapsed &&
                       children.map((child) => (
-                        <ChildRow key={child.id} child={child} min={window_.min} dayW={dayW} labelW={LABEL_W} timelineW={timelineW} onOpen={() => setOpenIssue(child.id)} />
+                        <ChildRow
+                          key={child.id}
+                          child={child}
+                          min={window_.min}
+                          dayW={dayW}
+                          labelW={LABEL_W}
+                          timelineW={timelineW}
+                          highlighted={highlightIds.has(child.id)}
+                          onOpen={() => setOpenIssue(child.id)}
+                        />
                       ))}
                   </div>
                 );
@@ -651,6 +682,7 @@ export function RoadmapView() {
                       labelW={LABEL_W}
                       timelineW={timelineW}
                       projectColor={data.project.color}
+                      highlighted={highlightIds.has(st.id)}
                       onOpen={() => setOpenIssue(st.id)}
                     />
                   ))}
@@ -701,12 +733,16 @@ function DependencyArrows({
   labelW,
   timelineW,
   issues,
+  hoveredId,
+  onHover,
 }: {
   edges: IssueEdgeDTO[];
   layout: RowLayout;
   labelW: number;
   timelineW: number;
   issues: IssueDTO[];
+  hoveredId: string | null;
+  onHover: (edge: IssueEdgeDTO | null) => void;
 }) {
   const byKey = useMemo(() => new Map(issues.map((i) => [i.id, i])), [issues]);
   const maxX = labelW + timelineW - 2;
@@ -757,23 +793,32 @@ function DependencyArrows({
           </marker>
         ))}
       </defs>
-      {paths.map(({ edge, d, color, label }) => (
-        <g key={edge.id} className="pointer-events-auto group/edge">
-          <title>{label}</title>
-          {/* halo for legibility over bars */}
-          <path d={d} fill="none" strokeWidth={4.5} className="stroke-card" strokeLinecap="round" />
-          <path
-            d={d}
-            fill="none"
-            strokeWidth={1.75}
-            stroke={color}
-            strokeLinecap="round"
-            markerEnd={`url(#edge-arrow-${edge.type})`}
-            className="transition-[stroke-width] duration-150 group-hover/edge:stroke-[3]"
-            opacity={0.9}
-          />
-        </g>
-      ))}
+      {paths.map(({ edge, d, color, label }) => {
+        const dimmed = hoveredId !== null && hoveredId !== edge.id;
+        return (
+          <g
+            key={edge.id}
+            className="pointer-events-auto cursor-pointer group/edge"
+            onPointerEnter={() => onHover(edge)}
+            onPointerLeave={() => onHover(null)}
+            style={{ opacity: dimmed ? 0.22 : 1, transition: "opacity 150ms" }}
+          >
+            <title>{label}</title>
+            {/* halo for legibility over bars */}
+            <path d={d} fill="none" strokeWidth={4.5} className="stroke-card" strokeLinecap="round" />
+            <path
+              d={d}
+              fill="none"
+              strokeWidth={1.75}
+              stroke={color}
+              strokeLinecap="round"
+              markerEnd={`url(#edge-arrow-${edge.type})`}
+              className="transition-[stroke-width] duration-150 group-hover/edge:stroke-[3]"
+              opacity={0.9}
+            />
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -844,6 +889,7 @@ function StoryRow({
   labelW,
   timelineW,
   projectColor,
+  highlighted,
   onOpen,
 }: {
   issue: IssueDTO;
@@ -852,6 +898,7 @@ function StoryRow({
   labelW: number;
   timelineW: number;
   projectColor: string;
+  highlighted?: boolean;
   onOpen: () => void;
 }) {
   const done = issue.status.category === "DONE";
@@ -859,7 +906,13 @@ function StoryRow({
   const geom = barGeom(issue, min, dayW, issue.dueDate ? toDay(issue.dueDate) : undefined);
 
   return (
-    <div className="relative flex border-b border-border/30" style={{ height: CHILD_H }}>
+    <div
+      className={cn(
+        "relative flex border-b border-border/30",
+        highlighted && "bg-amber-500/10 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.35)]"
+      )}
+      style={{ height: CHILD_H }}
+    >
       <div
         className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-2.5"
         style={{ width: labelW }}
@@ -917,6 +970,7 @@ function ChildRow({
   dayW,
   labelW,
   timelineW,
+  highlighted,
   onOpen,
 }: {
   child: IssueDTO;
@@ -924,6 +978,7 @@ function ChildRow({
   dayW: number;
   labelW: number;
   timelineW: number;
+  highlighted?: boolean;
   onOpen: () => void;
 }) {
   const done = child.status.category === "DONE";
@@ -933,7 +988,13 @@ function ChildRow({
   const width = due ? Math.max((differenceInCalendarDays(due, start) + 1) * dayW, dayW * 2) : dayW * 2;
 
   return (
-    <div className="relative flex border-b border-border/30 bg-muted/20" style={{ height: 32 }}>
+    <div
+      className={cn(
+        "relative flex border-b border-border/30 bg-muted/20",
+        highlighted && "bg-amber-500/10 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.35)]"
+      )}
+      style={{ height: 32 }}
+    >
       <div
         className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border bg-card px-2.5 pl-8"
         style={{ width: labelW }}

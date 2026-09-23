@@ -21,11 +21,12 @@ import {
   MailCheck,
   RefreshCw,
   Send,
+  Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { api2, apiDigest } from "@/lib/api-client";
+import { apiDigest } from "@/lib/api-client";
 import { usePortalStore } from "@/lib/portal-store";
 import type { DigestKindDTO, DigestPreviewPayload, EmailsPayload } from "@/lib/portal-types";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ export function DigestView() {
   const [log, setLog] = useState<EmailsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState<"me" | "all" | null>(null);
+  const [pruning, setPruning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,6 +86,23 @@ export function DigestView() {
   }
 
   const overdueCount = preview?.counts.overdue ?? 0;
+
+  async function pruneOutbox() {
+    setPruning(true);
+    try {
+      const res = await apiDigest.prune();
+      toast.success(
+        res.deleted > 0
+          ? `Pruned ${res.deleted} delivery${res.deleted === 1 ? "" : "s"} older than ${res.retentionDays} days`
+          : `Outbox is clean — nothing older than ${res.retentionDays} days`
+      );
+      setLog(await apiDigest.log());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to prune outbox");
+    } finally {
+      setPruning(false);
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 p-4 sm:p-6">
@@ -213,7 +232,22 @@ export function DigestView() {
             <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
               <MailCheck className="size-3.5 text-amber-500" aria-hidden /> Outbox — recent deliveries
             </div>
-            <span className="text-[11px] text-muted-foreground">{log?.emails.length ?? 0} recorded</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">
+                {log ? (log.total > log.emails.length ? `last ${log.emails.length} of ${log.total}` : `${log.total} recorded`) : "…"}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => void pruneOutbox()}
+                disabled={pruning}
+                title="Delete deliveries older than the retention window"
+              >
+                {pruning ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Trash2 className="size-3" aria-hidden />}
+                Clean up
+              </Button>
+            </div>
           </div>
           {log && log.emails.length > 0 ? (
             <div className="max-h-80 overflow-y-auto [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 dark:[&::-webkit-scrollbar-thumb]:bg-stone-600 [&::-webkit-scrollbar]:w-1.5">

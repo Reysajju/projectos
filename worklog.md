@@ -515,3 +515,48 @@ Stage Summary:
 - Remaining blueprint gaps: board column drag-reorder (buttons exist), mentions→email notifications linking, sprint auto-planning, dashboard widget drag (up/down buttons exist).
 - Known minor: Escape inside Select-in-Dialog closes both (shadcn default); Release-build test artifact was overlay focus, no fix needed; digest outbox grows unbounded (50 shown — consider pruning like webhook deliveries).
 - Recommended next: board column drag-reorder via dnd-kit, sprint auto-planning suggestions, outbox pruning + "Email me a preview" for weekly cadence, roadmap arrow hover → highlight both issue rows.
+---
+Task ID: 16 (round 8)
+Agent: coordinator
+Task: QA assessment (agent-browser) → status STABLE → shipped 4 features: board column drag-reorder, sprint auto-planning, outbox pruning, roadmap arrow-hover row tracing
+
+Work Log:
+STATUS ASSESSMENT
+- Dev server healthy; lint + tsc clean (pre-existing examples/ quirks only); browser sweep (dashboard, saved filters → Advanced Search 11 results, WEB board 5 columns, roadmap toggles, issues, digest) all passed; mobile 390px = 0 overflow; dark mode OK; 0 runtime console errors → phase STABLE → chose FEATURE WORK on the round-7 recommended next steps.
+
+FEATURE 1 — BOARD COLUMN DRAG-REORDER (§7 board config)
+- ColumnManagerPopover rebuilt on dnd-kit sortable: DndContext + SortableContext (verticalListSortingStrategy), closestCenter moved to @dnd-kit/core import, PointerSensor(distance 4) + KeyboardSensor(sortableKeyboardCoordinates).
+- New SortableStatusRow: GripVertical drag handle (listeners on handle only, so Switch/chevrons stay clickable), drag-lift styling (bg-muted + ring + shadow), CSS.Transform transitions; chevron up/down kept as a11y fallback; footer hint "Drag to reorder · saved to your account".
+- Persists through existing saveColPrefs → /api/preferences ("board.columns"); browser-verified: drag "To Do" above "Backlog" re-rendered board columns live, order SURVIVED full page reload, Reset restored default.
+
+FEATURE 2 — SPRINT AUTO-PLANNING (§9 backlog)
+- AutoPlanDialog in BacklogView + "Auto-plan" header button (Sparkles, amber outline, disabled when backlog empty).
+- Velocity = avg done-points over last 3 completed sprints (per-sprint sums of DONE issues' storyPoints); falls back to ASSUMED_VELOCITY=20 labeled "assumed (no sprint history)".
+- Candidates = backlog issues not DONE, ranked by priority.order desc → dueDate asc (nulls last) → backlog order. Greedy pre-selection fills to velocity (skips too-big items, keeps scanning).
+- Capacity card: velocity chip + emerald/amber/rose load bar (≤1x / ≤1.25x / over) + "N pts selected · fits within velocity" + unestimated count.
+- Target sprint Select lists FUTURE sprints + "Create Sprint N" option (POST /api/sprints then batch-move). Apply PATCHes sprintId in chunks of 5 with optimistic applyIssue per response; toast summary "Auto-planned 6 issues into WEB Sprint 3 · 12 pts · velocity 20 pts".
+- Browser-verified: 7 candidates pre-selected (12 pts), toggled WEB-2 off, applied → 6 issues landed in Sprint 3 (WEB-13 pre-existing), WEB-2 stayed in backlog; dark mode dialog verified.
+
+FEATURE 3 — OUTBOX PRUNING + RETENTION (§34 hygiene)
+- GET /api/emails now returns {total, retentionDays} alongside last-50 emails.
+- DELETE /api/emails (ADMIN/MANAGER) prunes EmailLog rows older than 30 days → {deleted, retentionDays}.
+- POST /api/digest/cron auto-prunes >30-day rows after each scheduled run (response includes prunedOld).
+- DigestView outbox header: "last N of total" / "N recorded" + "Clean up" button (Trash2/Loader2) → apiDigest.prune() → toast "Pruned N deliveries older than 30 days" or "Outbox is clean"; refreshed log after prune. Removed stray unused api2 import.
+- Browser-verified: clean-up toast correct (nothing >30d), counts display correct, weekly digest send regression-tested (queued + outbox row).
+
+FEATURE 4 — ROADMAP ARROW-HOVER ROW TRACING (§16×§8 polish)
+- DependencyArrows: per-edge pointerenter/leave → onHover callback; hovered edge at opacity 1 + thickened, all other edges dim to 0.22 (inline transition).
+- RoadmapView holds hoverEdge state → highlightIds {sourceId,targetId}; hovered edge's two issues get amber row treatment (bg-amber-500/10 + inset amber ring) across ALL row kinds: scheduled epic rows, unscheduled label-only rows, ChildRow, StoryRow (new `highlighted` prop on both row components).
+- Legend hint changed to "Hover an arrow to trace its issues". Arrow <g> is now cursor-pointer.
+- Browser-verified via mouse move onto arrow midpoint: hovering "WEB-7 causes WEB-11" highlighted exactly those 2 rows and dimmed the "WEB-11 blocks WEB-9" edge to 0.22; mouse-leave cleared highlights.
+
+QA / VERIFICATION
+- lint + tsc clean (fixed TS2724/TS2305: closestCenter→@dnd-kit/core, sortableKeyboardCoordinates casing).
+- Browser: all four features exercised end-to-end light + dark; mobile 390px = 0 horizontal overflow (board + backlog); fresh-load console = 0 errors (stale Turbopack build-error replays cleared after touch+reload; dev.log confirms no server errors).
+- Data note: Sprint 3 (WEB, FUTURE) now intentionally contains 6 auto-planned issues (12 pts) — realistic planning state left in place to demonstrate the feature.
+
+Stage Summary:
+- Round 8 shipped: per-user board column drag-reorder (dnd-kit sortable), velocity-based sprint auto-planning dialog, email outbox retention/pruning (manual + cron auto), roadmap dependency-arrow hover tracing with row highlighting.
+- Remaining blueprint gaps: email digests via real SMTP (swap point in sendEmail), sprint auto-planning week-scheduling (dates), roadmap arrow hover → floating type label, Issues-table column show/hide, dashboard widget drag (buttons exist).
+- Known minor: velocity "assumed" label uses 20 pts constant; outbox prune is org-wide (no per-user filter); Escape in Select-in-Dialog closes both (shadcn default).
+- Recommended next: Issues-table column manager (show/hide custom fields), dashboard widget drag-reorder, JQL-lite search operators (IN / ORDER BY), automation rule test-run button.

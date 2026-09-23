@@ -45,6 +45,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, orgs: orgs.length, emails, at: now.toISOString(), isMonday });
+    // Outbox hygiene: prune simulated deliveries older than 30 days.
+    const pruned = await db.emailLog.deleteMany({
+      where: { createdAt: { lt: new Date(Date.now() - 30 * 24 * 3600 * 1000) } },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      orgs: orgs.length,
+      emails,
+      prunedOld: pruned.count,
+      at: now.toISOString(),
+      isMonday,
+    });
   });
 }
