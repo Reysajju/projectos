@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { getSession, hashPassword } from "@/lib/auth";
 import { logActivity } from "@/lib/workflow";
 import { toMemberDTO } from "@/lib/dto";
-import { createAuthToken, deliverEmail } from "@/lib/mailer";
+import { appUrl, createAuthToken, deliverEmail } from "@/lib/mailer";
 import { inviteEmail } from "@/lib/email-templates";
 import {
   ApiError,
@@ -95,14 +95,15 @@ export async function POST(req: NextRequest) {
     let claimToken: string | null = null;
     if (sendEmailFlag) {
       claimToken = isNewUser ? await createAuthToken(user.id, "CLAIM", 24 * 7) : null;
+      const base = appUrl();
       const tpl = inviteEmail({
-        appUrl: process.env.APP_URL || "http://localhost:3000",
+        appUrl: base,
         orgName: session.org.name,
         inviterName: session.user.name,
         role,
         recipientName: user.name,
         claimUrl: claimToken
-          ? `${process.env.APP_URL || "http://localhost:3000"}/?claim=${encodeURIComponent(claimToken)}`
+          ? `${base}/?claim=${encodeURIComponent(claimToken)}`
           : null,
         isNewUser,
       });

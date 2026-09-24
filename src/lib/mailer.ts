@@ -51,13 +51,20 @@ export interface SmtpStatus {
   appUrl: string;
 }
 
+function isSmtpSecure(port: number): boolean {
+  if (process.env.SMTP_SECURE === "true" || process.env.SMTP_SECURE === "1") return true;
+  if (process.env.SMTP_SECURE === "false" || process.env.SMTP_SECURE === "0") return false;
+  return port === 465;
+}
+
 export function smtpStatus(): SmtpStatus {
   const configured = !!process.env.SMTP_HOST;
+  const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
   return {
     configured,
     host: process.env.SMTP_HOST ?? null,
     port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : null,
-    secure: process.env.SMTP_SECURE === "1" || process.env.SMTP_PORT === "465",
+    secure: isSmtpSecure(port),
     user: process.env.SMTP_USER ?? null,
     from: fromAddress(),
     appUrl: appUrl(),
@@ -73,11 +80,25 @@ async function getTransport(): Promise<Transporter | null> {
   if (!st.configured) return null;
   if (transporter) return transporter;
   const nodemailer = await import("nodemailer");
-  transporter = nodemailer.createTransport({
+  const createTransport =
+    (nodemailer as any).createTransport ||
+    (nodemailer as any).default?.createTransport;
+
+  const rawPass = process.env.SMTP_PASS || "";
+  // Strip whitespace if user copied Google App Password with spaces (e.g. "abcd efgh ijkl mnop")
+  const cleanPass =
+    rawPass.includes(" ") && rawPass.replace(/\s+/g, "").length === 16
+      ? rawPass.replace(/\s+/g, "")
+      : rawPass.trim();
+
+  transporter = createTransport({
     host: st.host!,
     port: st.port ?? 587,
     secure: st.secure,
-    auth: st.user ? { user: st.user, pass: process.env.SMTP_PASS } : undefined,
+    auth: st.user ? { user: st.user.trim(), pass: cleanPass } : undefined,
+    tls: {
+      rejectUnauthorized: process.env.SMTP_IGNORE_TLS === "true" ? false : undefined,
+    },
     // fail fast so request paths queueing emails never hang for minutes
     connectionTimeout: 12_000,
     greetingTimeout: 10_000,
@@ -90,7 +111,7 @@ async function getTransport(): Promise<Transporter | null> {
 export async function verifySmtp(): Promise<{ ok: boolean; error?: string }> {
   try {
     const t = await getTransport();
-    if (!t) return { ok: false, error: "SMTP is not configured" };
+    if (!t) return { ok: false, error: "SMTP_HOST is not configured in your environment variables" };
     await t.verify();
     return { ok: true };
   } catch (err) {

@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth";
 import { toOrgDTO, toUserDTO } from "@/lib/dto";
 import { ApiError, handle, jsonError, optStr, parseBody, reqStr } from "@/lib/api-helpers";
-import { queueEmail } from "@/lib/mailer";
+import { appUrl, queueEmail } from "@/lib/mailer";
 import { welcomeEmail } from "@/lib/email-templates";
 
 export const dynamic = "force-dynamic";
@@ -66,11 +66,11 @@ export async function POST(req: NextRequest) {
 
     // Welcome email (fire-and-forget; SIMULATED outbox row when SMTP is off).
     const tpl = welcomeEmail({
-      appUrl: (process.env.APP_URL || "http://localhost:3000").replace(/\/+$/, ""),
+      appUrl: appUrl(),
       name: user.name,
       orgName: org.name,
     });
-    queueEmail({
+    await queueEmail({
       orgId: org.id,
       userId: user.id,
       toEmail: user.email,

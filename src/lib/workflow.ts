@@ -61,7 +61,7 @@ export async function notify(opts: {
       issueId: opts.issueId ?? null,
     },
   });
-  void sendNotificationEmail({
+  await sendNotificationEmail({
     orgId: opts.orgId,
     userId: opts.userId,
     type: opts.type,
