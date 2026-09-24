@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       user: toUserDTO(user),
       org: toOrgDTO(membership.org),
     });
-    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(req));
     return res;
   });
 }

@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     const token = req.cookies.get(SESSION_COOKIE)?.value;
     if (token) await destroySession(token);
     const res = NextResponse.json({});
-    res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 });
+    res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(req), maxAge: 0 });
     return res;
   });
 }

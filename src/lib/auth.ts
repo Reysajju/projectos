@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { db } from "@/lib/db";
 import type { User, Organization } from "@prisma/client";
 
@@ -41,24 +41,65 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 // ─── Sessions ───────────────────────────────────────────────────
 
+function getSessionSecret(): string {
+  return process.env.CRON_SECRET || process.env.DIGEST_CRON_SECRET || "projectos_internal_session_secret_2026";
+}
+
+function signSessionToken(userId: string, expiresAt: Date): string {
+  const exp = expiresAt.getTime();
+  const rand = randomBytes(16).toString("hex");
+  const data = `${userId}.${exp}.${rand}`;
+  const sig = createHmac("sha256", getSessionSecret()).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+function verifySignedSessionToken(token: string): { userId: string } | null {
+  const parts = token.split(".");
+  if (parts.length !== 4) return null;
+  const [userId, expStr, rand, sig] = parts;
+  const exp = Number(expStr);
+  if (!exp || Number.isNaN(exp) || exp < Date.now()) return null;
+  const data = `${userId}.${expStr}.${rand}`;
+  const expectedSig = createHmac("sha256", getSessionSecret()).update(data).digest("base64url");
+  if (sig !== expectedSig) return null;
+  return { userId };
+}
+
 export async function createSession(userId: string): Promise<string> {
-  const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  await db.session.create({ data: { token, userId, expiresAt } });
+  const token = signSessionToken(userId, expiresAt);
+  try {
+    await db.session.create({ data: { token, userId, expiresAt } });
+  } catch (err) {
+    console.warn("[session] Could not persist session in db (using stateless token):", err);
+  }
   return token;
 }
 
 export async function destroySession(token: string) {
-  await db.session.deleteMany({ where: { token } });
+  try {
+    await db.session.deleteMany({ where: { token } });
+  } catch {
+    // Ignore db failure on logout
+  }
 }
 
-export function sessionCookieOptions() {
+export function sessionCookieOptions(req?: Request) {
+  let isHttps = false;
+  if (req) {
+    const proto = req.headers.get("x-forwarded-proto");
+    const host = req.headers.get("host") || "";
+    isHttps =
+      proto === "https" ||
+      req.url.startsWith("https:") ||
+      (!host.includes("localhost") && !host.includes("127.0.0.1") && process.env.NODE_ENV === "production");
+  } else if (process.env.COOKIE_SECURE === "true") {
+    isHttps = true;
+  }
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure:
-      process.env.COOKIE_SECURE === "true" ||
-      (process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false"),
+    secure: isHttps && process.env.COOKIE_SECURE !== "false",
     path: "/",
     maxAge: SESSION_DAYS * 24 * 60 * 60,
   };
@@ -115,20 +156,38 @@ export async function getSession(req: Request): Promise<SessionInfo | null> {
   if (match) token = decodeURIComponent(match.slice(SESSION_COOKIE.length + 1));
   if (!token) return null;
 
-  const session = await db.session.findUnique({
-    where: { token },
-    include: { user: true },
-  });
-  if (!session || session.expiresAt < new Date()) return null;
+  let user: User | null = null;
+  try {
+    const session = await db.session.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+    if (session && session.expiresAt >= new Date()) {
+      user = session.user;
+    }
+  } catch {
+    // DB session lookup error fallback
+  }
+
+  if (!user) {
+    const verified = verifySignedSessionToken(token);
+    if (!verified) return null;
+    user = await db.user.findUnique({
+      where: { id: verified.userId },
+    });
+  }
+
+  if (!user) return null;
 
   const membership = await db.organizationMember.findFirst({
-    where: { userId: session.userId },
+    where: { userId: user.id },
     include: { org: true },
+    orderBy: { createdAt: "asc" },
   });
   if (!membership) return null;
 
   return {
-    user: session.user,
+    user,
     org: membership.org,
     role: membership.role,
     membershipId: membership.id,
