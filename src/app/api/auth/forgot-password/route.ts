@@ -25,14 +25,19 @@ export async function POST(req: NextRequest) {
     const user = await db.user.findUnique({ where: { email } });
     if (user) {
       const raw = await createAuthToken(user.id, "RESET", 1);
-      const base = (process.env.APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+      const { appUrl } = await import("@/lib/mailer");
+      const base = appUrl();
       const tpl = resetEmail({
         appUrl: base,
         name: user.name,
         resetUrl: `${base}/?reset=${encodeURIComponent(raw)}`,
       });
+      const member = await db.organizationMember.findFirst({ where: { userId: user.id } });
+      const defaultOrg = !member ? await db.organization.findFirst() : null;
+      const orgId = member?.orgId || defaultOrg?.id || "system";
+
       await deliverEmail({
-        orgId: (await db.organizationMember.findFirst({ where: { userId: user.id } }))?.orgId ?? "system",
+        orgId,
         userId: user.id,
         toEmail: user.email,
         kind: "RESET",

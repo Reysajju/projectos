@@ -489,8 +489,8 @@ model WebhookDelivery {
 
 model EmailLog {
   id        String   @id @default(cuid())
-  orgId     String
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId     String?
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   userId    String?
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   kind      String   // INVITE | WELCOME | RESET | TEST | ASSIGNED | STATUS_CHANGED | COMMENT | MENTIONED | DAILY_DIGEST | WEEKLY_DIGEST

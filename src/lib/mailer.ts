@@ -216,33 +216,47 @@ export interface DeliverResult {
 export async function deliverEmail(opts: DeliverOpts): Promise<DeliverResult> {
   const st = smtpStatus();
 
+  const effectiveOrgId = opts.orgId && opts.orgId !== "system" ? opts.orgId : null;
+
   // Preference gate for notification-type emails (not transactional ones).
   if (!opts.transactional && opts.userId) {
     const enabled = await isEmailKindEnabled(opts.userId, opts.kind);
     if (!enabled) {
-      const row = await db.emailLog.create({
-        data: {
-          orgId: opts.orgId, userId: opts.userId, toEmail: opts.toEmail,
-          kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
-          status: "SIMULATED", error: null,
-          meta: JSON.stringify({ ...opts.meta, skipped: "user preference" }),
-        },
-      });
-      return { logId: row.id, status: "SIMULATED", error: "skipped (user preference)" };
+      let logId = "skipped";
+      try {
+        const row = await db.emailLog.create({
+          data: {
+            orgId: effectiveOrgId, userId: opts.userId, toEmail: opts.toEmail,
+            kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
+            status: "SIMULATED", error: null,
+            meta: JSON.stringify({ ...opts.meta, skipped: "user preference" }),
+          },
+        });
+        logId = row.id;
+      } catch {
+        // Non-blocking log failure
+      }
+      return { logId, status: "SIMULATED", error: "skipped (user preference)" };
     }
   }
 
   if (!st.configured) {
     // Simulation mode — auditable outbox, identical rendering.
-    const row = await db.emailLog.create({
-      data: {
-        orgId: opts.orgId, userId: opts.userId, toEmail: opts.toEmail,
-        kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
-        status: "SIMULATED", error: null,
-        meta: JSON.stringify({ ...opts.meta, simulated: true, reason: "SMTP not configured" }),
-      },
-    });
-    return { logId: row.id, status: "SIMULATED" };
+    let logId = "simulated";
+    try {
+      const row = await db.emailLog.create({
+        data: {
+          orgId: effectiveOrgId, userId: opts.userId, toEmail: opts.toEmail,
+          kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
+          status: "SIMULATED", error: null,
+          meta: JSON.stringify({ ...opts.meta, simulated: true, reason: "SMTP not configured" }),
+        },
+      });
+      logId = row.id;
+    } catch {
+      // Non-blocking log failure
+    }
+    return { logId, status: "SIMULATED" };
   }
 
   try {
@@ -256,27 +270,39 @@ export async function deliverEmail(opts: DeliverOpts): Promise<DeliverResult> {
       html: opts.html,
       headers: { "X-ProjectOS-Kind": opts.kind },
     });
-    const row = await db.emailLog.create({
-      data: {
-        orgId: opts.orgId, userId: opts.userId, toEmail: opts.toEmail,
-        kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
-        status: "SENT", error: null,
-        meta: JSON.stringify({ ...opts.meta, transport: "smtp" }),
-      },
-    });
-    return { logId: row.id, status: "SENT" };
+    let logId = "sent";
+    try {
+      const row = await db.emailLog.create({
+        data: {
+          orgId: effectiveOrgId, userId: opts.userId, toEmail: opts.toEmail,
+          kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
+          status: "SENT", error: null,
+          meta: JSON.stringify({ ...opts.meta, transport: "smtp" }),
+        },
+      });
+      logId = row.id;
+    } catch {
+      // Non-blocking log failure
+    }
+    return { logId, status: "SENT" };
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown SMTP error";
-    const row = await db.emailLog.create({
-      data: {
-        orgId: opts.orgId, userId: opts.userId, toEmail: opts.toEmail,
-        kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
-        status: "FAILED", error: message.slice(0, 500),
-        meta: JSON.stringify({ ...opts.meta, transport: "smtp" }),
-      },
-    });
+    let logId = "failed";
+    try {
+      const row = await db.emailLog.create({
+        data: {
+          orgId: effectiveOrgId, userId: opts.userId, toEmail: opts.toEmail,
+          kind: opts.kind, subject: opts.subject, body: opts.text, html: opts.html,
+          status: "FAILED", error: message.slice(0, 500),
+          meta: JSON.stringify({ ...opts.meta, transport: "smtp" }),
+        },
+      });
+      logId = row.id;
+    } catch {
+      // Non-blocking log failure
+    }
     transporter = null; // reconnect on next attempt
-    return { logId: row.id, status: "FAILED", error: message };
+    return { logId, status: "FAILED", error: message };
   }
 }
 

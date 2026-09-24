@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   return handle(async () => {
     const body = await parseBody(req);
-    const email = reqStr(body, "email").toLowerCase();
+    const email = reqStr(body, "email").toLowerCase().trim();
     const password = reqStr(body, "password");
 
     const user = await db.user.findUnique({ where: { email } });
@@ -23,13 +23,22 @@ export async function POST(req: NextRequest) {
       return jsonError("Invalid email or password", 401);
     }
 
-    // Org = first membership (createdAt asc). No membership → cannot use the portal.
-    const membership = await db.organizationMember.findFirst({
+    // Org = first membership (createdAt asc). Auto-attach to default org if missing.
+    let membership = await db.organizationMember.findFirst({
       where: { userId: user.id },
       include: { org: true },
       orderBy: { createdAt: "asc" },
     });
-    if (!membership) return jsonError("No workspace", 400);
+    if (!membership) {
+      const defaultOrg = await db.organization.findFirst();
+      if (defaultOrg) {
+        membership = await db.organizationMember.create({
+          data: { orgId: defaultOrg.id, userId: user.id, role: "MEMBER" },
+          include: { org: true },
+        });
+      }
+    }
+    if (!membership) return jsonError("No workspace available", 400);
 
     const token = await createSession(user.id);
     const res = NextResponse.json({

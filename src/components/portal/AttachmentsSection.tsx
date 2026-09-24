@@ -17,9 +17,11 @@ import {
   FileVideo,
   File as FileIcon,
   Image as ImageIcon,
+  Link2,
   Loader2,
   Maximize2,
   Paperclip,
+  Share2,
   Trash2,
   UploadCloud,
 } from "lucide-react";
@@ -134,6 +136,22 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
     }
   }
 
+  function copyShareLink(att: AttachmentDTO) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}${api.attachmentUrl(att.id, true)}`;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      toast.success(`Share link copied for "${att.originalName}"`);
+    } else {
+      toast.info(`Link: ${url}`);
+    }
+  }
+
+  function canPreview(att: AttachmentDTO): boolean {
+    const kind = fileKind(att);
+    return kind === "image" || kind === "video" || kind === "audio" || kind === "pdf";
+  }
+
   return (
     <section className="mt-5" aria-label="Attachments">
       <div className="mb-2 flex items-center justify-between">
@@ -208,6 +226,7 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
         <ul className="space-y-1.5">
           {attachments.map((att) => {
             const kind = fileKind(att);
+            const previewable = canPreview(att);
             return (
               <li
                 key={att.id}
@@ -231,6 +250,15 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
                       <Maximize2 className="size-3 text-white" aria-hidden />
                     </span>
                   </button>
+                ) : previewable ? (
+                  <button
+                    type="button"
+                    onClick={() => setPreview(att)}
+                    title={`Preview ${att.originalName}`}
+                    className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-transform hover:scale-105", tileClass(kind))}
+                  >
+                    <KindIcon att={att} className="h-4 w-4" />
+                  </button>
                 ) : (
                   <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", tileClass(kind))}>
                     <KindIcon att={att} className="h-4 w-4" />
@@ -238,11 +266,11 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
                 )}
 
                 <div className="min-w-0 flex-1">
-                  {kind === "image" ? (
+                  {previewable ? (
                     <button
                       type="button"
                       onClick={() => setPreview(att)}
-                      className="block max-w-full truncate text-xs font-medium text-foreground hover:text-amber-700 hover:underline dark:hover:text-amber-400"
+                      className="block max-w-full truncate text-left text-xs font-medium text-foreground hover:text-amber-700 hover:underline dark:hover:text-amber-400"
                       title={att.originalName}
                     >
                       {att.originalName}
@@ -266,6 +294,15 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
                 </div>
 
                 <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => copyShareLink(att)}
+                    title="Copy share link"
+                    aria-label={`Copy share link for ${att.originalName}`}
+                    className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <Share2 className="h-3.5 w-3.5" aria-hidden />
+                  </button>
                   <a
                     href={api.attachmentUrl(att.id, true)}
                     download={att.originalName}
@@ -293,12 +330,12 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
         </ul>
       )}
 
-      {/* Image lightbox */}
+      {/* Media lightbox / preview dialog */}
       <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 pr-6">
-              <ImageIcon className="size-4 shrink-0 text-sky-600 dark:text-sky-400" aria-hidden />
+              <KindIcon att={preview || ({} as any)} className="size-4 shrink-0 text-amber-600" />
               <span className="truncate">{preview?.originalName}</span>
             </DialogTitle>
             <DialogDescription>
@@ -311,29 +348,60 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
             </DialogDescription>
           </DialogHeader>
           {preview && (
-            <div className="overflow-hidden rounded-lg border bg-muted/40 p-1">
-              {/* muted backdrop so transparent PNGs stay visible */}
-              <img
-                src={api.attachmentUrl(preview.id)}
-                alt={preview.originalName}
-                className="mx-auto max-h-[60vh] w-auto max-w-full rounded-md object-contain"
-              />
+            <div className="overflow-hidden rounded-lg border bg-muted/40 p-2">
+              {fileKind(preview) === "image" && (
+                <img
+                  src={api.attachmentUrl(preview.id)}
+                  alt={preview.originalName}
+                  className="mx-auto max-h-[60vh] w-auto max-w-full rounded-md object-contain"
+                />
+              )}
+              {fileKind(preview) === "video" && (
+                <video
+                  controls
+                  autoPlay={false}
+                  src={api.attachmentUrl(preview.id)}
+                  className="mx-auto max-h-[60vh] w-full rounded-md"
+                />
+              )}
+              {fileKind(preview) === "audio" && (
+                <div className="py-8 px-4 text-center">
+                  <audio controls src={api.attachmentUrl(preview.id)} className="w-full" />
+                </div>
+              )}
+              {fileKind(preview) === "pdf" && (
+                <iframe
+                  src={api.attachmentUrl(preview.id)}
+                  title={preview.originalName}
+                  className="h-[60vh] w-full rounded-md border-0"
+                />
+              )}
             </div>
           )}
           {preview && (
-            <div className="flex items-center justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setPreview(null)}>
-                Close
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => copyShareLink(preview)}
+              >
+                <Share2 className="size-3.5" aria-hidden /> Copy share link
               </Button>
-              <Button asChild size="sm" className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700">
-                <a
-                  href={api.attachmentUrl(preview.id, true)}
-                  download={preview.originalName}
-                  aria-label={`Download ${preview.originalName}`}
-                >
-                  <Download className="size-3.5" aria-hidden /> Download
-                </a>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPreview(null)}>
+                  Close
+                </Button>
+                <Button asChild size="sm" className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700">
+                  <a
+                    href={api.attachmentUrl(preview.id, true)}
+                    download={preview.originalName}
+                    aria-label={`Download ${preview.originalName}`}
+                  >
+                    <Download className="size-3.5" aria-hidden /> Download
+                  </a>
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
