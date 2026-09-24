@@ -25,14 +25,43 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   }
 
   try {
-    const { getObject } = await import("@/lib/storage");
-    const data = await getObject(attachment.orgId, attachment.storageKey);
+    const { getObjectStream } = await import("@/lib/storage");
+    const { Readable } = await import("node:stream");
     const forceDownload = req.nextUrl.searchParams.get("download") === "1";
     const disposition = forceDownload ? "attachment" : "inline";
-    return new NextResponse(new Uint8Array(data), {
+
+    const rangeHeader = req.headers.get("range");
+    if (rangeHeader) {
+      const parts = rangeHeader.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const { size } = await getObjectStream(attachment.orgId, attachment.storageKey);
+      const end = parts[1] ? parseInt(parts[1], 10) : size - 1;
+      const chunkSize = end - start + 1;
+
+      const { stream } = await getObjectStream(attachment.orgId, attachment.storageKey, { start, end });
+      const webStream = Readable.toWeb(stream as any);
+
+      return new Response(webStream as any, {
+        status: 206,
+        headers: {
+          "Content-Range": `bytes ${start}-${end}/${size}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": String(chunkSize),
+          "Content-Type": attachment.mimeType,
+          "Content-Disposition": `${disposition}; filename="${encodeURIComponent(attachment.originalName)}"`,
+          "Cache-Control": "private, max-age=3600",
+        },
+      });
+    }
+
+    const { stream, size } = await getObjectStream(attachment.orgId, attachment.storageKey);
+    const webStream = Readable.toWeb(stream as any);
+
+    return new Response(webStream as any, {
       headers: {
         "Content-Type": attachment.mimeType,
-        "Content-Length": String(data.length),
+        "Content-Length": String(size),
+        "Accept-Ranges": "bytes",
         "Content-Disposition": `${disposition}; filename="${encodeURIComponent(attachment.originalName)}"`,
         "Cache-Control": "private, max-age=3600",
         "X-Content-Type-Options": "nosniff",

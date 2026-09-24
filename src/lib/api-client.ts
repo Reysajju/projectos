@@ -166,28 +166,84 @@ export const api = {
 
   // ─── Attachments (multipart — no JSON content-type) ─────────
 
-  uploadAttachment: async (issueId: string, file: File): Promise<AttachmentDTO> => {
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/issues/${issueId}/attachments`, {
-      method: "POST",
-      body: fd,
-      credentials: "same-origin",
-    });
-    let data: unknown = null;
-    try {
-      data = await res.json();
-    } catch {
-      // fall through
+  uploadAttachment: async (
+    issueId: string,
+    file: File,
+    onProgress?: (percent: number) => void
+  ): Promise<AttachmentDTO> => {
+    // 3.5 MB chunks ensure we stay safely within Vercel's 4.5 MB request body limit
+    const CHUNK_SIZE = 3.5 * 1024 * 1024;
+
+    if (file.size <= CHUNK_SIZE) {
+      const fd = new FormData();
+      fd.append("file", file);
+      onProgress?.(30);
+      const res = await fetch(`/api/issues/${issueId}/attachments`, {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+      });
+      let data: unknown = null;
+      try {
+        data = await res.json();
+      } catch {
+        // fall through
+      }
+      if (!res.ok) {
+        const msg =
+          data && typeof data === "object" && "error" in data
+            ? String((data as { error: unknown }).error)
+            : `Upload failed (${res.status})`;
+        throw new ApiError(msg, res.status);
+      }
+      onProgress?.(100);
+      return (data as { attachment: AttachmentDTO }).attachment;
     }
-    if (!res.ok) {
-      const msg =
-        data && typeof data === "object" && "error" in data
-          ? String((data as { error: unknown }).error)
-          : `Upload failed (${res.status})`;
-      throw new ApiError(msg, res.status);
+
+    // Chunked multi-part upload for large files up to GB scale
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    let lastData: unknown = null;
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+
+      const fd = new FormData();
+      fd.append("chunk", chunk, file.name);
+      fd.append("uploadId", uploadId);
+      fd.append("chunkIndex", String(i));
+      fd.append("totalChunks", String(totalChunks));
+      fd.append("fileName", file.name);
+      fd.append("fileSize", String(file.size));
+      fd.append("mimeType", file.type || "application/octet-stream");
+
+      const res = await fetch(`/api/issues/${issueId}/attachments`, {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+      });
+
+      try {
+        lastData = await res.json();
+      } catch {
+        lastData = null;
+      }
+
+      if (!res.ok) {
+        const msg =
+          lastData && typeof lastData === "object" && "error" in lastData
+            ? String((lastData as { error: unknown }).error)
+            : `Upload failed on chunk ${i + 1}/${totalChunks} (${res.status})`;
+        throw new ApiError(msg, res.status);
+      }
+
+      const percent = Math.round(((i + 1) / totalChunks) * 100);
+      onProgress?.(percent);
     }
-    return (data as { attachment: AttachmentDTO }).attachment;
+
+    return (lastData as { attachment: AttachmentDTO }).attachment;
   },
 
   attachmentUrl: (attachmentId: string, download = false) =>

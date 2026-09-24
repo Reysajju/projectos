@@ -10,9 +10,11 @@ import { useCallback, useRef, useState } from "react";
 import {
   Download,
   FileArchive,
+  FileAudio,
   FileCode2,
   FileSpreadsheet,
   FileText,
+  FileVideo,
   File as FileIcon,
   Image as ImageIcon,
   Loader2,
@@ -38,16 +40,18 @@ interface Props {
   onChange: (next: AttachmentDTO[]) => void;
 }
 
-const MAX_MB = 10;
+const MAX_GB = 5;
 
-function fileKind(att: AttachmentDTO): "image" | "pdf" | "text" | "code" | "sheet" | "archive" | "other" {
-  const m = att.mimeType;
+function fileKind(att: AttachmentDTO): "image" | "pdf" | "text" | "code" | "sheet" | "archive" | "video" | "audio" | "other" {
+  const m = att.mimeType.toLowerCase();
   if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
   if (m === "application/pdf") return "pdf";
   if (m.startsWith("text/")) return "text";
-  if (m === "application/json") return "code";
+  if (m === "application/json" || m === "application/xml") return "code";
   if (m.includes("spreadsheet") || m.includes("msword") || m.includes("presentation") || m === "text/csv") return "sheet";
-  if (m.includes("zip") || m.includes("gzip")) return "archive";
+  if (m.includes("zip") || m.includes("gzip") || m.includes("tar") || m.includes("7z") || m.includes("rar")) return "archive";
   return "other";
 }
 
@@ -55,6 +59,8 @@ function KindIcon({ att, className }: { att: AttachmentDTO; className?: string }
   const kind = fileKind(att);
   const map = {
     image: ImageIcon,
+    video: FileVideo,
+    audio: FileAudio,
     pdf: FileText,
     text: FileText,
     code: FileCode2,
@@ -70,6 +76,8 @@ function KindIcon({ att, className }: { att: AttachmentDTO; className?: string }
 function tileClass(kind: ReturnType<typeof fileKind>): string {
   switch (kind) {
     case "image": return "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300";
+    case "video": return "bg-pink-50 text-pink-700 dark:bg-pink-950/60 dark:text-pink-300";
+    case "audio": return "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300";
     case "pdf": return "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300";
     case "code": return "bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300";
     case "sheet": return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
@@ -81,12 +89,13 @@ function tileClass(kind: ReturnType<typeof fileKind>): string {
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, onChange }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState<{ name: string } | null>(null);
+  const [uploading, setUploading] = useState<{ name: string; percent?: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [preview, setPreview] = useState<AttachmentDTO | null>(null);
 
@@ -94,13 +103,15 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
     async (files: FileList | File[]) => {
       if (!canEdit) return;
       for (const file of Array.from(files)) {
-        if (file.size > MAX_MB * 1024 * 1024) {
-          toast.error(`"${file.name}" exceeds the ${MAX_MB} MB limit`);
+        if (file.size > MAX_GB * 1024 * 1024 * 1024) {
+          toast.error(`"${file.name}" exceeds the ${MAX_GB} GB limit`);
           continue;
         }
-        setUploading({ name: file.name });
+        setUploading({ name: file.name, percent: 0 });
         try {
-          const created = await api.uploadAttachment(issueId, file);
+          const created = await api.uploadAttachment(issueId, file, (percent) => {
+            setUploading({ name: file.name, percent });
+          });
           onChange([created, ...attachments]);
           toast.success(`Attached "${file.name}" to ${issueKey}`);
         } catch (err) {
@@ -167,12 +178,14 @@ export function AttachmentsSection({ issueId, issueKey, attachments, canEdit, on
           {uploading ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              <span className="max-w-[220px] truncate">Uploading {uploading.name}…</span>
+              <span className="max-w-[240px] truncate">
+                Uploading {uploading.name} {uploading.percent !== undefined ? `(${uploading.percent}%)` : ""}…
+              </span>
             </>
           ) : (
             <>
               <UploadCloud className="h-3.5 w-3.5 transition-transform group-hover:-translate-y-0.5" aria-hidden />
-              <span>Drop files here or <span className="font-medium underline underline-offset-2">browse</span> · max {MAX_MB} MB</span>
+              <span>Drop files here or <span className="font-medium underline underline-offset-2">browse</span> · up to {MAX_GB} GB</span>
             </>
           )}
           <input

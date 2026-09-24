@@ -8,6 +8,10 @@ import { toAttachmentDTO } from "@/lib/dto";
 import {
   ALLOWED_MIME,
   MAX_FILE_BYTES,
+  appendChunk,
+  cleanTempUpload,
+  finalizeUpload,
+  formatBytes,
   makeStorageKey,
   putObject,
   sanitizeFileName,
@@ -19,7 +23,11 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ issueId: string }> };
 
-/** POST multipart/form-data { file } — upload one attachment (S3-style flow). */
+/**
+ * POST multipart/form-data:
+ * - Single-part: { file }
+ * - Chunked: { chunk, uploadId, chunkIndex, totalChunks, fileName, fileSize, mimeType }
+ */
 export async function POST(req: NextRequest, ctx: Ctx) {
   return handle(async () => {
     const session = await getSession(req);
@@ -37,6 +45,79 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     } catch {
       return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
     }
+
+    const uploadId = form.get("uploadId");
+    const chunkIndexStr = form.get("chunkIndex");
+    const totalChunksStr = form.get("totalChunks");
+
+    // ─── Chunked Upload Pathway (bypasses Vercel 4.5MB limit, supports GBs) ───
+    if (uploadId && typeof uploadId === "string" && chunkIndexStr !== null && totalChunksStr !== null) {
+      const chunk = form.get("chunk");
+      if (!(chunk instanceof Blob)) {
+        return NextResponse.json({ error: "chunk blob is required" }, { status: 400 });
+      }
+
+      const chunkIndex = parseInt(String(chunkIndexStr), 10);
+      const totalChunks = parseInt(String(totalChunksStr), 10);
+      const fileNameRaw = String(form.get("fileName") || "file");
+      const fileSize = Number(form.get("fileSize") || 0);
+      const mime = String(form.get("mimeType") || chunk.type || "application/octet-stream");
+
+      if (fileSize > MAX_FILE_BYTES) {
+        await cleanTempUpload(uploadId);
+        return NextResponse.json(
+          { error: `File exceeds the ${formatBytes(MAX_FILE_BYTES)} limit` },
+          { status: 413 }
+        );
+      }
+
+      const chunkBuffer = Buffer.from(await chunk.arrayBuffer());
+      await appendChunk(uploadId, chunkBuffer);
+
+      // Non-final chunk: acknowledge receipt
+      if (chunkIndex < totalChunks - 1) {
+        return NextResponse.json({ ok: true, chunkIndex, totalChunks });
+      }
+
+      // Final chunk arrived: assemble, compute sha256 checksum and move into place
+      const originalName = sanitizeFileName(fileNameRaw);
+      const storageKey = makeStorageKey(originalName);
+      const { checksum, size } = await finalizeUpload(uploadId, orgId, storageKey);
+
+      const attachment = await db.attachment.create({
+        data: {
+          orgId,
+          issueId: issue.id,
+          uploadedById: session.user.id,
+          originalName,
+          storageKey,
+          mimeType: mime,
+          size,
+          checksum,
+        },
+        include: { uploadedBy: true },
+      });
+
+      await logActivity({
+        orgId,
+        userId: session.user.id,
+        issueId: issue.id,
+        projectId: issue.projectId,
+        type: "issue.updated",
+        field: "attachment",
+        newValue: originalName,
+      });
+
+      void fireWebhooks("issue.updated", {
+        orgId,
+        actor: { id: session.user.id, name: session.user.name },
+        data: { action: "attachment.added", issueKey: issue.key, attachment: originalName },
+      });
+
+      return NextResponse.json({ attachment: toAttachmentDTO(attachment) }, { status: 201 });
+    }
+
+    // ─── Single Direct File Upload Pathway ───
     const file = form.get("file");
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -46,14 +127,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     if (file.size > MAX_FILE_BYTES) {
       return NextResponse.json(
-        { error: `File exceeds the ${Math.round(MAX_FILE_BYTES / (1024 * 1024))} MB limit` },
+        { error: `File exceeds the ${formatBytes(MAX_FILE_BYTES)} limit` },
         { status: 413 }
       );
     }
     const mime = file.type || "application/octet-stream";
-    if (!ALLOWED_MIME.includes(mime)) {
-      return NextResponse.json({ error: `Unsupported file type: ${mime}` }, { status: 415 });
-    }
 
     const originalName = sanitizeFileName(file.name);
     const buffer = Buffer.from(await file.arrayBuffer());

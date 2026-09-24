@@ -382,7 +382,7 @@ model Attachment {
   originalName String
   storageKey   String   // opaque object key inside the storage bucket (db/uploads)
   mimeType     String
-  size         Int      // bytes
+  size         Float    // bytes (Float supports files > 2.14 GB without integer overflow)
   checksum     String   // sha256 hex of the content
   createdAt    DateTime @default(now())
 

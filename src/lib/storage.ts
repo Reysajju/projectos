@@ -1,17 +1,15 @@
 /**
  * Object storage adapter (blueprint §15) — S3-style opaque keys.
  *
- * The blueprint mandates "never store files inside the database"; production
- * would bind this to S3/MinIO via presigned URLs. In this sandbox we ship a
- * local-disk adapter with the SAME interface (put/get/delete + keys), so the
- * rest of the app never touches the filesystem directly and can be re-bound
- * to S3 by swapping only this file.
+ * Supports single-part and chunked uploads up to GB scale (configurable MAX_FILE_BYTES),
+ * streaming downloads (zero RAM spikes), and Range requests.
  *
  * Layout:  db/uploads/<orgId>/<storageKey>
  * Keys are generated server-side (cuid + sanitized extension) — the browser
  * never controls the path, which prevents traversal/overwrite attacks.
  */
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile, stat, rename, copyFile, appendFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -21,19 +19,24 @@ const BUCKET_ROOT =
     ? path.join("/tmp", "uploads")
     : path.join(process.cwd(), "db", "uploads"));
 
-export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — configurable limit (§37)
+// Default 5 GB limit (customizable via MAX_FILE_BYTES environment variable)
+export const MAX_FILE_BYTES =
+  Number(process.env.MAX_FILE_BYTES) || 5 * 1024 * 1024 * 1024;
 
-/** MIME types the portal accepts. Empty extension-safe list, no executables. */
+/** Common MIME types accepted in the portal. All safe types accepted. */
 export const ALLOWED_MIME = [
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "image/bmp",
   "application/pdf",
-  "text/plain", "text/markdown", "text/csv",
-  "application/json",
-  "application/zip", "application/gzip",
+  "text/plain", "text/markdown", "text/csv", "text/html",
+  "application/json", "application/xml",
+  "application/zip", "application/gzip", "application/x-tar", "application/x-7z-compressed", "application/x-rar-compressed",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "video/mp4", "video/webm", "video/quicktime", "video/x-matroska",
+  "audio/mpeg", "audio/wav", "audio/ogg", "audio/aac",
+  "application/octet-stream",
 ];
 
 export class StorageError extends Error {
@@ -70,7 +73,7 @@ export function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-/** Persist bytes under an org-scoped key. Returns the storage key. */
+/** Persist small object buffer under an org-scoped key. */
 export async function putObject(orgId: string, key: string, data: Buffer): Promise<void> {
   const dir = path.join(BUCKET_ROOT, orgId);
   const abs = path.join(dir, key);
@@ -79,12 +82,100 @@ export async function putObject(orgId: string, key: string, data: Buffer): Promi
   await writeFile(abs, data);
 }
 
-/** Read bytes back. Throws StorageError(404) when the object is missing. */
+/** Read bytes back in memory (for smaller files). */
 export async function getObject(orgId: string, key: string): Promise<Buffer> {
   const abs = path.join(BUCKET_ROOT, orgId, key);
   assertInsideBucket(abs);
   try {
     return await readFile(abs);
+  } catch {
+    throw new StorageError("Object missing from storage", 404);
+  }
+}
+
+/** Append an upload chunk to a temporary file on disk. */
+export async function appendChunk(uploadId: string, chunkBuffer: Buffer): Promise<void> {
+  const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId) throw new StorageError("Invalid upload ID", 400);
+
+  const tempDir = path.join(BUCKET_ROOT, "temp");
+  const tempPath = path.join(tempDir, `${safeId}.part`);
+  assertInsideBucket(tempPath);
+
+  await mkdir(tempDir, { recursive: true });
+  await appendFile(tempPath, chunkBuffer);
+}
+
+/** Finalize chunked upload: computes sha256 checksum and moves to destination. */
+export async function finalizeUpload(
+  uploadId: string,
+  orgId: string,
+  storageKey: string
+): Promise<{ checksum: string; size: number }> {
+  const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const tempDir = path.join(BUCKET_ROOT, "temp");
+  const tempPath = path.join(tempDir, `${safeId}.part`);
+  assertInsideBucket(tempPath);
+
+  const targetDir = path.join(BUCKET_ROOT, orgId);
+  const targetPath = path.join(targetDir, storageKey);
+  assertInsideBucket(targetPath);
+
+  await mkdir(targetDir, { recursive: true });
+
+  // Stream hash calculation and byte counting without memory spikes
+  const hash = createHash("sha256");
+  let totalBytes = 0;
+
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(tempPath);
+    stream.on("data", (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      hash.update(chunk);
+    });
+    stream.on("end", () => resolve());
+    stream.on("error", (err) => reject(err));
+  });
+
+  const checksum = hash.digest("hex");
+
+  try {
+    await rename(tempPath, targetPath);
+  } catch {
+    // Fallback if cross-device boundary
+    await copyFile(tempPath, targetPath);
+    await unlink(tempPath).catch(() => {});
+  }
+
+  return { checksum, size: totalBytes };
+}
+
+/** Clean up incomplete or failed chunked upload temp file. */
+export async function cleanTempUpload(uploadId: string): Promise<void> {
+  const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId) return;
+  const tempPath = path.join(BUCKET_ROOT, "temp", `${safeId}.part`);
+  try {
+    await unlink(tempPath);
+  } catch {
+    // already removed
+  }
+}
+
+/** Open a stream for reading without loading into Node.js buffer memory. */
+export async function getObjectStream(
+  orgId: string,
+  key: string,
+  range?: { start: number; end: number }
+): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
+  const abs = path.join(BUCKET_ROOT, orgId, key);
+  assertInsideBucket(abs);
+  try {
+    const st = await stat(abs);
+    const stream = range
+      ? createReadStream(abs, { start: range.start, end: range.end })
+      : createReadStream(abs);
+    return { stream, size: st.size };
   } catch {
     throw new StorageError("Object missing from storage", 404);
   }
@@ -104,5 +195,6 @@ export async function deleteObject(orgId: string, key: string): Promise<void> {
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
