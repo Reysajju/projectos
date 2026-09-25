@@ -97,11 +97,20 @@ function jsonBody(body: unknown, method: string): RequestInit {
 // ─── Auth ───────────────────────────────────────────────────────
 
 export const api = {
-  signup: (body: { email: string; name: string; password: string; orgName: string; orgSlug: string }) =>
+  signup: (body: { email: string; name: string; orgName: string; orgSlug: string; password?: string }) =>
     apiFetch<AuthPayload>("/api/auth/signup", jsonBody(body, "POST")),
 
-  login: (body: { email: string; password: string }) =>
+  login: (body: { email: string; password?: string; isDemo?: boolean }) =>
     apiFetch<AuthPayload>("/api/auth/login", jsonBody(body, "POST")),
+
+  demoLogin: () =>
+    apiFetch<AuthPayload>("/api/auth/login", jsonBody({ email: "sarah@acme.dev", isDemo: true }, "POST")),
+
+  sendMagicLink: (body: { email: string; name?: string }) =>
+    apiFetch<{ ok: boolean; email: string }>("/api/auth/magic", jsonBody(body, "POST")),
+
+  verifyMagicLink: (body: { token: string }) =>
+    apiFetch<AuthPayload>("/api/auth/magic/verify", jsonBody(body, "POST")),
 
   logout: () => apiFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 
@@ -110,13 +119,13 @@ export const api = {
       `/api/auth/claim?token=${encodeURIComponent(token)}`
     ),
 
-  claimAccount: (body: { token: string; name?: string; password: string }) =>
+  claimAccount: (body: { token: string; name?: string; password?: string }) =>
     apiFetch<AuthPayload>("/api/auth/claim", jsonBody(body, "POST")),
 
   forgotPassword: (body: { email: string }) =>
     apiFetch<{ ok: boolean }>("/api/auth/forgot-password", jsonBody(body, "POST")),
 
-  resetPassword: (body: { token: string; password: string }) =>
+  resetPassword: (body: { token: string; password?: string }) =>
     apiFetch<AuthPayload>("/api/auth/reset-password", jsonBody(body, "POST")),
 
   me: () => apiFetch<MePayload>("/api/auth/me"),

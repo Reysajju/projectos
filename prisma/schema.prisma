@@ -16,7 +16,7 @@ model User {
   id           String   @id @default(cuid())
   email        String   @unique
   name         String
-  passwordHash String
+  passwordHash String?  // Optional — passwordless Magic Link is primary
   avatarColor  String   @default("#d97706")
   title        String?
   createdAt    DateTime @default(now())
@@ -41,17 +41,16 @@ model User {
   authTokens    AuthToken[]
 }
 
-// ─── Claim / reset tokens (invitations + password recovery) ─────
-// A CLAIM token is emailed when someone is invited to an org without a
-// known password: the link (?claim=<raw>) lets them set name+password.
-// A RESET token powers the "forgot password" flow (?reset=<raw>, 1 h).
+// ─── Magic link & invite tokens (passwordless authentication) ─────
+// A MAGIC_LINK token powers passwordless email login (?magic=<raw>, 30 min).
+// A CLAIM token is emailed when someone is invited to an org.
 // Only the sha256 hash of the raw token is stored — same policy as API keys.
 model AuthToken {
   id        String    @id @default(cuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String    @unique
-  purpose   String    // CLAIM | RESET
+  purpose   String    // MAGIC_LINK | CLAIM | RESET
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())

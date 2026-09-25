@@ -24,10 +24,7 @@ export async function POST(req: NextRequest) {
     const body = await parseBody(req);
     const token = reqStr(body, "token");
     const name = clip(optStr(body, "name") ?? "", 80)?.trim() ?? "";
-    const password = body.password;
-    if (typeof password !== "string" || password.length < 8) {
-      throw new ApiError("Password must be at least 8 characters", 400);
-    }
+    const password = typeof body?.password === "string" && body.password.length >= 6 ? body.password : null;
 
     const claimed = await consumeAuthToken(token, "CLAIM");
     if (!claimed) {
@@ -40,7 +37,7 @@ export async function POST(req: NextRequest) {
     const user = await db.user.update({
       where: { id: claimed.userId },
       data: {
-        passwordHash: hashPassword(password),
+        ...(password ? { passwordHash: hashPassword(password) } : {}),
         ...(name ? { name } : {}),
       },
     });

@@ -244,6 +244,37 @@ export function resetEmail(opts: { appUrl: string; name: string; resetUrl: strin
   };
 }
 
+export function magicLinkEmail(opts: {
+  appUrl: string;
+  name?: string;
+  magicUrl: string;
+}): EmailTemplate {
+  const firstName = opts.name ? esc(opts.name.split(" ")[0]) : "there";
+  const subject = "Your ProjectOS sign-in link";
+  const content = `
+    <p style="margin:14px 0 0;font-size:14px;line-height:22px;color:${C.text};">
+      Hi ${firstName}, click the button below to sign in to your ProjectOS workspace.
+      This link is valid for <strong>30 minutes</strong> and can only be used once.
+    </p>
+    ${button(opts.magicUrl, "Sign in to ProjectOS")}
+    <p style="margin:14px 0 0;font-size:12px;line-height:19px;color:${C.textFaint};">
+      Or copy and paste this link into your browser:<br>
+      <a href="${esc(opts.magicUrl)}" style="color:${C.amberDark};word-break:break-all;">${esc(opts.magicUrl)}</a><br><br>
+      If you did not request this link, you can safely ignore this email.
+    </p>`;
+  return {
+    subject,
+    html: layout({
+      title: "Sign in with Magic Link",
+      intro: "Passwordless sign-in requested for your ProjectOS account.",
+      content,
+      footerNote: "You're receiving this because a sign-in link was requested for this email.",
+      appUrl: opts.appUrl,
+    }),
+    text: `Hi ${firstName},\n\nSign in to ProjectOS using this link (valid for 30 minutes):\n${opts.magicUrl}\n\nIf you did not request this, you can safely ignore this email.`,
+  };
+}
+
 export function assignedEmail(opts: {
   appUrl: string; actorName: string; issue: IssueCtx; recipientName: string;
 }): EmailTemplate {

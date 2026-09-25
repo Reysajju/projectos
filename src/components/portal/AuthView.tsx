@@ -5,10 +5,10 @@ import {
   ArrowLeft,
   CheckCircle2,
   Columns3,
-  KeyRound,
   Loader2,
-  LogIn,
+  Mail,
   MailCheck,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
   UserPlus,
@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AuthPayload } from "@/lib/portal-types";
 
-type Mode = "auth" | "claim" | "claim-invalid" | "forgot" | "forgot-sent" | "reset";
+type Mode = "auth" | "sent" | "claim" | "claim-invalid";
 
 function slugify(name: string): string {
   return name
@@ -37,52 +37,98 @@ function slugify(name: string): string {
 const FEATURES = [
   { icon: Columns3, text: "Kanban boards, sprints & backlog planning" },
   { icon: Zap, text: "Workflow engine with audit trail & automations" },
-  { icon: MailCheck, text: "Email on invites, assignments, comments & digests" },
+  { icon: MailCheck, text: "Passwordless Magic Link email authentication" },
   { icon: ShieldCheck, text: "Multi-tenant workspaces with role-based access" },
 ] as const;
 
-/** Reads ?claim= / ?reset= from the URL once on mount. */
-function useTokenParam(): { claimToken: string | null; resetToken: string | null } {
+/** Reads ?claim=, ?magic=, ?auth_error= from the URL on mount. */
+function useTokenParam(): {
+  claimToken: string | null;
+  magicToken: string | null;
+  authError: string | null;
+} {
   return useMemo(() => {
-    if (typeof window === "undefined") return { claimToken: null, resetToken: null };
+    if (typeof window === "undefined") {
+      return { claimToken: null, magicToken: null, authError: null };
+    }
     const params = new URLSearchParams(window.location.search);
     return {
       claimToken: params.get("claim"),
-      resetToken: params.get("reset"),
+      magicToken: params.get("magic"),
+      authError: params.get("auth_error"),
     };
   }, []);
 }
 
 export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => void }) {
-  const { claimToken, resetToken } = useTokenParam();
-  const [mode, setMode] = useState<Mode>(claimToken ? "claim" : resetToken ? "reset" : "auth");
-
+  const { claimToken, magicToken, authError } = useTokenParam();
+  const [mode, setMode] = useState<Mode>(claimToken ? "claim" : "auth");
   const [busy, setBusy] = useState<string | null>(null);
 
-  // claim
+  // Magic link request state
+  const [email, setEmail] = useState("");
+  const [sentEmail, setSentEmail] = useState("");
+
+  // Claim invitation state
   const [claimName, setClaimName] = useState("");
-  const [claimPassword, setClaimPassword] = useState("");
   const [claimChecked, setClaimChecked] = useState(!claimToken);
 
-  // reset
-  const [resetPassword, setResetPassword] = useState("");
-
-  // forgot
-  const [fpEmail, setFpEmail] = useState("");
-
-  // login
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  // signup
+  // Signup state
   const [suName, setSuName] = useState("");
   const [suEmail, setSuEmail] = useState("");
-  const [suPassword, setSuPassword] = useState("");
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
 
-  // ── Validate claim token ──
+  function cleanUrl() {
+    if (typeof window !== "undefined") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
+
+  // ── Auto-verify ?magic=<token> from email link ──
+  useEffect(() => {
+    if (!magicToken) return;
+    let alive = true;
+    setBusy("verifying");
+    toast.loading("Verifying your sign-in link…", { id: "magic-verify" });
+
+    api
+      .verifyMagicLink({ token: magicToken })
+      .then((payload) => {
+        if (!alive) return;
+        cleanUrl();
+        toast.success(`Welcome back, ${payload.user.name.split(" ")[0]}!`, { id: "magic-verify" });
+        onAuthed(payload);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        cleanUrl();
+        toast.error(err instanceof Error ? err.message : "Sign-in link is invalid or has expired", {
+          id: "magic-verify",
+        });
+      })
+      .finally(() => {
+        if (alive) setBusy(null);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [magicToken, onAuthed]);
+
+  // ── Handle auth error redirect from direct GET /api/auth/magic ──
+  useEffect(() => {
+    if (!authError) return;
+    cleanUrl();
+    if (authError === "expired") {
+      toast.error("Your sign-in link has expired. Please request a new one.");
+    } else {
+      toast.error("Sign-in link was invalid. Please enter your email to receive a fresh link.");
+    }
+  }, [authError]);
+
+  // ── Validate claim invitation token ──
   useEffect(() => {
     if (!claimToken) return;
     let alive = true;
@@ -103,23 +149,54 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
     };
   }, [claimToken]);
 
-  function cleanUrl() {
-    window.history.replaceState({}, "", window.location.pathname);
-  }
+  // Send Magic Link to email
+  async function doSendMagicLink(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return;
 
-  async function doLogin(emailVal: string, passwordVal: string, kind: "login" | "demo") {
-    setBusy(kind);
+    setBusy("magic");
     try {
-      const payload = await api.login({ email: emailVal, password: passwordVal });
-      toast.success(`Welcome back, ${payload.user.name.split(" ")[0]}!`);
-      onAuthed(payload);
+      await api.sendMagicLink({ email: cleanEmail });
+      setSentEmail(cleanEmail);
+      setMode("sent");
+      toast.success(`Sign-in link sent to ${cleanEmail}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Login failed");
+      toast.error(err instanceof Error ? err.message : "Failed to send sign-in link");
     } finally {
       setBusy(null);
     }
   }
 
+  // Resend Magic Link
+  async function doResendMagicLink() {
+    if (!sentEmail) return;
+    setBusy("resend");
+    try {
+      await api.sendMagicLink({ email: sentEmail });
+      toast.success(`Fresh sign-in link sent to ${sentEmail}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resend link");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // 1-Click Instant Demo Login
+  async function doDemoLogin() {
+    setBusy("demo");
+    try {
+      const payload = await api.demoLogin();
+      toast.success(`Welcome to Acme Corp demo, ${payload.user.name.split(" ")[0]}!`);
+      onAuthed(payload);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Demo login failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Passwordless workspace signup
   async function doSignup(e: React.FormEvent) {
     e.preventDefault();
     if (!orgSlug.trim()) {
@@ -131,7 +208,6 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
       const payload = await api.signup({
         email: suEmail.trim(),
         name: suName.trim(),
-        password: suPassword,
         orgName: orgName.trim(),
         orgSlug: orgSlug.trim(),
       });
@@ -144,6 +220,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
     }
   }
 
+  // Passwordless claim invitation
   async function doClaim(e: React.FormEvent) {
     e.preventDefault();
     if (!claimToken) return;
@@ -152,7 +229,6 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
       const payload = await api.claimAccount({
         token: claimToken,
         name: claimName.trim() || undefined,
-        password: claimPassword,
       });
       cleanUrl();
       toast.success(`Account ready — welcome, ${payload.user.name.split(" ")[0]}!`);
@@ -164,39 +240,63 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
     }
   }
 
-  async function doReset(e: React.FormEvent) {
-    e.preventDefault();
-    if (!resetToken) return;
-    setBusy("reset");
-    try {
-      const payload = await api.resetPassword({ token: resetToken, password: resetPassword });
-      cleanUrl();
-      toast.success("Password updated — you are signed in.");
-      onAuthed(payload);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not reset password");
-    } finally {
-      setBusy(null);
-    }
-  }
+  // ────────────────────────────────────────────────────────────
+  // Magic Link Sent State
+  // ────────────────────────────────────────────────────────────
+  if (mode === "sent") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-sm">
+          <div className="text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-amber-500/10 ring-1 ring-amber-500/30">
+              <MailCheck className="size-7 text-amber-600" aria-hidden />
+            </div>
+            <h2 className="mt-4 text-xl font-semibold text-foreground">Check your email</h2>
+            <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+              We sent a passwordless sign-in link to:
+            </p>
+            <p className="mt-1 font-mono text-sm font-semibold text-foreground bg-muted/60 py-1.5 px-3 rounded-md inline-block">
+              {sentEmail}
+            </p>
+            <p className="mt-4 text-xs text-muted-foreground/80">
+              Click the button in your email to sign in instantly. The link is valid for 30 minutes.
+            </p>
 
-  async function doForgot(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy("forgot");
-    try {
-      await api.forgotPassword({ email: fpEmail.trim() });
-      setMode("forgot-sent");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Request failed");
-    } finally {
-      setBusy(null);
-    }
+            <div className="mt-6 flex flex-col gap-2.5">
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => void doResendMagicLink()}
+                disabled={busy !== null}
+              >
+                {busy === "resend" ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <RotateCcw className="size-4" aria-hidden />
+                )}
+                Resend email
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full text-xs text-muted-foreground"
+                onClick={() => {
+                  setMode("auth");
+                  setEmail(sentEmail);
+                }}
+              >
+                Use a different email
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // ────────────────────────────────────────────────────────────
-  // Standalone flows (claim / reset / forgot)
+  // Claim Invitation State
   // ────────────────────────────────────────────────────────────
-  if (mode !== "auth") {
+  if (mode === "claim" || mode === "claim-invalid") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
         <div className="w-full max-w-md">
@@ -205,13 +305,12 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
             onClick={() => setMode("auth")}
             className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            <ArrowLeft className="size-4" aria-hidden /> Back to log in
+            <ArrowLeft className="size-4" aria-hidden /> Back to sign in
           </button>
 
-          {/* Claim invitation */}
           {mode === "claim" && (
             <form
-              className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
+              className="space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm"
               onSubmit={doClaim}
             >
               <div className="flex items-start gap-3">
@@ -222,7 +321,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                   <h2 className="text-lg font-semibold text-foreground">Join your team</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {claimChecked
-                      ? "You've been invited to a ProjectOS workspace. Choose a password to activate your account."
+                      ? "You've been invited to collaborate on ProjectOS. Confirm your name to activate your account."
                       : "Validating your invitation link…"}
                   </p>
                 </div>
@@ -230,7 +329,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
               {claimChecked && (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="claim-name">Your name</Label>
+                    <Label htmlFor="claim-name">Your display name</Label>
                     <Input
                       id="claim-name"
                       required
@@ -239,22 +338,9 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                       onChange={(e) => setClaimName(e.target.value)}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="claim-password">Choose a password</Label>
-                    <Input
-                      id="claim-password"
-                      type="password"
-                      required
-                      minLength={8}
-                      autoComplete="new-password"
-                      placeholder="At least 8 characters"
-                      value={claimPassword}
-                      onChange={(e) => setClaimPassword(e.target.value)}
-                    />
-                  </div>
                   <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
                     {busy === "claim" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CheckCircle2 className="size-4" aria-hidden />}
-                    Activate account
+                    Join workspace
                   </Button>
                 </>
               )}
@@ -262,106 +348,14 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
           )}
 
           {mode === "claim-invalid" && (
-            <div className="space-y-4 rounded-lg border border-border bg-card p-6 text-center shadow-sm">
-              <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-rose-500/10">
-                <KeyRound className="size-6 text-rose-600" aria-hidden />
-              </div>
-              <h2 className="text-lg font-semibold text-foreground">Invitation link expired</h2>
-              <p className="text-sm text-muted-foreground">
-                This link is invalid, already used, or older than 7 days. Ask your workspace admin to
-                resend the invitation from <strong>Team → member menu → Resend invite</strong>.
+            <div className="rounded-xl border border-border bg-card p-6 text-center shadow-sm">
+              <h2 className="text-lg font-semibold text-foreground">Invitation expired or invalid</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                This invitation link cannot be used. Please ask your workspace administrator to resend your invite.
               </p>
-              <Button variant="outline" className="w-full" onClick={() => setMode("auth")}>
-                Go to log in
+              <Button variant="outline" className="mt-4 w-full" onClick={() => setMode("auth")}>
+                Return to sign in
               </Button>
-            </div>
-          )}
-
-          {/* Reset password */}
-          {mode === "reset" && (
-            <form
-              className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
-              onSubmit={doReset}
-            >
-              <div className="flex items-start gap-3">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30">
-                  <KeyRound className="size-5 text-amber-600" aria-hidden />
-                </span>
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">Choose a new password</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Pick something strong — you&apos;ll be signed in automatically afterwards.
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reset-password">New password</Label>
-                <Input
-                  id="reset-password"
-                  type="password"
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                  placeholder="At least 8 characters"
-                  value={resetPassword}
-                  onChange={(e) => setResetPassword(e.target.value)}
-                />
-              </div>
-              <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
-                {busy === "reset" && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                Update password
-              </Button>
-            </form>
-          )}
-
-          {/* Forgot password */}
-          {(mode === "forgot" || mode === "forgot-sent") && (
-            <div className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
-              {mode === "forgot" ? (
-                <form className="space-y-4" onSubmit={doForgot}>
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30">
-                      <KeyRound className="size-5 text-amber-600" aria-hidden />
-                    </span>
-                    <div>
-                      <h2 className="text-lg font-semibold text-foreground">Forgot your password?</h2>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Enter your email and we&apos;ll send a reset link (valid for 1 hour).
-                      </p>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="fp-email">Email</Label>
-                    <Input
-                      id="fp-email"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      placeholder="you@company.com"
-                      value={fpEmail}
-                      onChange={(e) => setFpEmail(e.target.value)}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
-                    {busy === "forgot" && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                    Send reset link
-                  </Button>
-                </form>
-              ) : (
-                <div className="space-y-4 text-center">
-                  <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-500/10">
-                    <MailCheck className="size-6 text-emerald-600" aria-hidden />
-                  </div>
-                  <h2 className="text-lg font-semibold text-foreground">Check your inbox</h2>
-                  <p className="text-sm text-muted-foreground">
-                    If an account exists for <strong>{fpEmail}</strong>, a password-reset link is on
-                    its way. It expires in one hour.
-                  </p>
-                  <Button variant="outline" className="w-full" onClick={() => setMode("auth")}>
-                    Back to log in
-                  </Button>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -370,7 +364,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
   }
 
   // ────────────────────────────────────────────────────────────
-  // Standard log in / sign up
+  // Main Passwordless Auth Screen
   // ────────────────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen bg-background">
@@ -392,7 +386,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
             Ship work, not status meetings.
           </h1>
           <p className="mt-3 max-w-sm text-sm leading-relaxed text-stone-400">
-            Boards, backlogs, sprints, reports and notifications — one portal for your whole
+            Boards, backlogs, sprints, reports and notifications — one passwordless portal for your whole
             organization, from first ticket to release.
           </p>
           <ul className="mt-8 space-y-3">
@@ -408,7 +402,7 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
         </div>
 
         <p className="relative text-xs text-stone-500">
-          © {new Date().getFullYear()} ProjectOS · Self-hosted project management
+          © {new Date().getFullYear()} ProjectOS · Passwordless Project Management
         </p>
       </aside>
 
@@ -425,30 +419,28 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
           <Tabs defaultValue="login">
             <TabsList className="mb-6 grid w-full grid-cols-2">
               <TabsTrigger value="login" className="gap-1.5">
-                <LogIn className="size-3.5" aria-hidden /> Log in
+                <Mail className="size-3.5" aria-hidden /> Sign in
               </TabsTrigger>
               <TabsTrigger value="signup" className="gap-1.5">
-                <UserPlus className="size-3.5" aria-hidden /> Sign up
+                <UserPlus className="size-3.5" aria-hidden /> New workspace
               </TabsTrigger>
             </TabsList>
 
-            {/* ── Login ── */}
+            {/* ── Sign In (Passwordless Magic Link) ── */}
             <TabsContent value="login">
               <form
-                className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void doLogin(email.trim(), password, "login");
-                }}
+                className="space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm"
+                onSubmit={doSendMagicLink}
               >
                 <div>
                   <h2 className="text-lg font-semibold text-foreground">Welcome back</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Log in to your organization workspace.
+                    Enter your email to receive a passwordless sign-in link.
                   </p>
                 </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="login-email">Email</Label>
+                  <Label htmlFor="login-email">Work email</Label>
                   <Input
                     id="login-email"
                     type="email"
@@ -459,63 +451,58 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                     onChange={(e) => setEmail(e.target.value)}
                   />
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="login-password">Password</Label>
-                    <button
-                      type="button"
-                      onClick={() => setMode("forgot")}
-                      className="text-xs font-medium text-amber-600 transition-colors hover:text-amber-700"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
-                  <Input
-                    id="login-password"
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-                <Button type="submit" className="w-full gap-2" disabled={busy !== null}>
-                  {busy === "login" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <LogIn className="size-4" aria-hidden />}
-                  Log in
+
+                <Button
+                  type="submit"
+                  className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700"
+                  disabled={busy !== null}
+                >
+                  {busy === "magic" ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Mail className="size-4" aria-hidden />
+                  )}
+                  Send Magic Link
                 </Button>
+
                 <div className="relative py-1 text-center">
                   <span className="relative z-10 bg-card px-3 text-xs uppercase tracking-wide text-muted-foreground/80">
                     or
                   </span>
                   <span aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-muted" />
                 </div>
+
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full gap-2 border-amber-300 bg-amber-500/10 text-amber-600 hover:bg-amber-100 hover:text-amber-900"
+                  className="w-full gap-2 border-amber-300/60 bg-amber-500/10 text-amber-600 hover:bg-amber-100 hover:text-amber-900 dark:border-amber-700/40 dark:hover:bg-amber-950/40 dark:text-amber-400"
                   disabled={busy !== null}
-                  onClick={() => void doLogin("sarah@acme.dev", "demo1234", "demo")}
+                  onClick={() => void doDemoLogin()}
                 >
-                  {busy === "demo" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Sparkles className="size-4" aria-hidden />}
-                  Try demo account
+                  {busy === "demo" ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Sparkles className="size-4" aria-hidden />
+                  )}
+                  Try demo workspace
                 </Button>
+
                 <p className="text-center text-xs text-muted-foreground/80">
-                  Demo org “Acme Corp” — seeded projects, sprints & reports.
+                  Passwordless authentication — zero passwords to create, remember, or reset.
                 </p>
               </form>
             </TabsContent>
 
-            {/* ── Sign up ── */}
+            {/* ── New Workspace (Passwordless Signup) ── */}
             <TabsContent value="signup">
               <form
-                className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
+                className="space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm"
                 onSubmit={doSignup}
               >
                 <div>
                   <h2 className="text-lg font-semibold text-foreground">Create your workspace</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    You&apos;ll be the organization admin.
+                    Set up an organization workspace for your team.
                   </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -524,13 +511,13 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                     <Input
                       id="su-name"
                       required
-                      placeholder="Ada Lovelace"
+                      placeholder="Rey Sajju"
                       value={suName}
                       onChange={(e) => setSuName(e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="su-email">Email</Label>
+                    <Label htmlFor="su-email">Work email</Label>
                     <Input
                       id="su-email"
                       type="email"
@@ -541,21 +528,9 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                     />
                   </div>
                 </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="su-password">Password</Label>
-                  <Input
-                    id="su-password"
-                    type="password"
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
-                    placeholder="At least 8 characters"
-                    value={suPassword}
-                    onChange={(e) => setSuPassword(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="su-org">Organization name</Label>
+                  <Label htmlFor="su-org">Workspace name</Label>
                   <Input
                     id="su-org"
                     required
@@ -586,16 +561,18 @@ export function AuthView({ onAuthed }: { onAuthed: (payload: AuthPayload) => voi
                     />
                   </div>
                 </div>
-                <Button type="submit" className="w-full gap-2" disabled={busy !== null}>
+
+                <Button type="submit" className="w-full gap-2 bg-amber-600 text-white hover:bg-amber-700" disabled={busy !== null}>
                   {busy === "signup" ? (
                     <Loader2 className="size-4 animate-spin" aria-hidden />
                   ) : (
                     <CheckCircle2 className="size-4" aria-hidden />
                   )}
-                  Create workspace
+                  Create workspace &amp; sign in
                 </Button>
+
                 <p className="text-center text-xs text-muted-foreground/80">
-                  A workspace with default issue types, statuses &amp; priorities is provisioned automatically.
+                  Default issue types, statuses, priorities, and boards are provisioned automatically.
                 </p>
               </form>
             </TabsContent>

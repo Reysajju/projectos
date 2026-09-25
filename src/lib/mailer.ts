@@ -120,10 +120,12 @@ export async function verifySmtp(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-// ─── Token machinery (claim / reset links) ──────────────────────
+// ─── Token machinery (magic link / claim / reset links) ─────────
+
+export type AuthTokenPurpose = "MAGIC_LINK" | "CLAIM" | "RESET";
 
 /** Create a single-use AuthToken and return the raw token (only time it exists). */
-export async function createAuthToken(userId: string, purpose: "CLAIM" | "RESET", hours = 24): Promise<string> {
+export async function createAuthToken(userId: string, purpose: AuthTokenPurpose, hours = 24): Promise<string> {
   const raw = randomBytes(24).toString("base64url");
   await db.authToken.create({
     data: {
@@ -138,7 +140,7 @@ export async function createAuthToken(userId: string, purpose: "CLAIM" | "RESET"
 
 export async function consumeAuthToken(
   raw: string,
-  purpose: "CLAIM" | "RESET"
+  purpose: AuthTokenPurpose
 ): Promise<{ userId: string } | null> {
   const row = await db.authToken.findUnique({
     where: { tokenHash: createHash("sha256").update(raw).digest("hex") },
@@ -180,6 +182,7 @@ function kindToPrefKey(kind: string): string | null {
     case "MENTIONED": return "email.comment";
     case "DAILY_DIGEST":
     case "WEEKLY_DIGEST": return "email.digest";
+    case "MAGIC_LINK":
     case "INVITE":
     case "WELCOME":
     case "RESET":

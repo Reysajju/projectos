@@ -5,41 +5,36 @@ import {
   SESSION_COOKIE,
   createSession,
   sessionCookieOptions,
-  verifyPassword,
 } from "@/lib/auth";
 import { toOrgDTO, toUserDTO } from "@/lib/dto";
+import { consumeAuthToken } from "@/lib/mailer";
 import { handle, jsonError, parseBody, reqStr } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * POST /api/auth/magic/verify { token }
+ * In-app token verification (single-page app flow). Returns user & org DTOs, sets session cookie.
+ */
 export async function POST(req: NextRequest) {
   return handle(async () => {
     const body = await parseBody(req);
-    const email = reqStr(body, "email").toLowerCase().trim();
-    const password = reqStr(body, "password");
+    const token = reqStr(body, "token");
 
-    const isDemo = body?.isDemo === true || (email === "sarah@acme.dev" && !password);
-
-    const user = await db.user.findUnique({ where: { email } });
-    if (!user) {
-      return jsonError("Account not found. Please sign in using Magic Link.", 404);
+    const claimed = await consumeAuthToken(token, "MAGIC_LINK");
+    if (!claimed) {
+      return jsonError("This sign-in link is invalid, already used, or expired.", 400);
     }
 
-    if (!isDemo) {
-      if (!password) {
-        return jsonError("Password login has been replaced with Magic Link. Please use email sign-in.", 400);
-      }
-      if (!user.passwordHash || !verifyPassword(password, user.passwordHash)) {
-        return jsonError("Invalid credentials. Please sign in via Magic Link.", 401);
-      }
-    }
+    const user = await db.user.findUnique({ where: { id: claimed.userId } });
+    if (!user) return jsonError("User account not found", 404);
 
-    // Org = first membership (createdAt asc). Auto-attach to default org if missing.
     let membership = await db.organizationMember.findFirst({
       where: { userId: user.id },
       include: { org: true },
       orderBy: { createdAt: "asc" },
     });
+
     if (!membership) {
       const defaultOrg = await db.organization.findFirst();
       if (defaultOrg) {
@@ -49,14 +44,15 @@ export async function POST(req: NextRequest) {
         });
       }
     }
+
     if (!membership) return jsonError("No workspace available", 400);
 
-    const token = await createSession(user.id);
+    const sessionToken = await createSession(user.id);
     const res = NextResponse.json({
       user: toUserDTO(user),
       org: toOrgDTO(membership.org),
     });
-    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(req));
+    res.cookies.set(SESSION_COOKIE, sessionToken, sessionCookieOptions(req));
     return res;
   });
 }
